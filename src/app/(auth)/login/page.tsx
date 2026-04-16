@@ -115,7 +115,20 @@ export default function LoginPage() {
     }
   }
 
+  function enterTrialMode(role: 'admin' | 'clinic' | 'doctor' | 'patient') {
+    localStorage.setItem('trial_role', role);
+    router.push('/dashboard');
+  }
+
+  const TRIAL_ROLES = [
+    { role: 'admin'   as const, icon: '🛡️', label: 'Admin' },
+    { role: 'clinic'  as const, icon: '🏥', label: 'Klinika' },
+    { role: 'doctor'  as const, icon: '👨‍⚕️', label: 'Shifokor' },
+    { role: 'patient' as const, icon: '👤', label: 'Bemor' },
+  ];
+
   return (
+    <>
     <Card>
       <CardHeader className="space-y-1">
         <div className="flex justify-end mb-2"><LanguageSwitcher variant="compact" /></div>
@@ -182,5 +195,29 @@ export default function LoginPage() {
         </p>
       </CardFooter>
     </Card>
+
+    {/* ── TRIAL MODE BANNER ─────────────────────────────────────────────────── */}
+    <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
+      <p className="text-center text-xs font-semibold text-amber-700 uppercase tracking-wider mb-3">
+        🚀 Demo rejimda kirish — hisob yaratmasdan sinab ko&apos;ring
+      </p>
+      <div className="grid grid-cols-4 gap-2">
+        {TRIAL_ROLES.map(({ role, icon, label }) => (
+          <button
+            key={role}
+            onClick={() => enterTrialMode(role)}
+            className="flex flex-col items-center gap-1 rounded-lg border border-amber-200 bg-white px-2 py-3 text-center hover:border-amber-400 hover:bg-amber-50 transition-colors cursor-pointer"
+          >
+            <span className="text-xl">{icon}</span>
+            <span className="text-xs font-medium text-slate-700">{label}</span>
+          </button>
+        ))}
+      </div>
+      <p className="text-center text-xs text-amber-600 mt-2">
+        Chiqish uchun brauzer localStorage ni tozalang yoki yangi hisob bilan kiring
+      </p>
+    </div>
+    {/* ── END TRIAL MODE BANNER ─────────────────────────────────────────────── */}
+    </>
   );
 }

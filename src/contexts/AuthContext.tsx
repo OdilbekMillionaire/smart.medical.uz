@@ -35,6 +35,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const firebaseDb = getFirebaseDb();
 
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
+      // ── TRIAL MODE: bypass Firebase auth for demo purposes ──────────────────
+      if (!firebaseUser) {
+        const trialRole = typeof window !== 'undefined'
+          ? (localStorage.getItem('trial_role') as UserRole | null)
+          : null;
+        if (trialRole) {
+          const names: Record<UserRole, string> = {
+            admin: 'Demo Admin',
+            clinic: 'Demo Klinika',
+            doctor: 'Demo Shifokor',
+            patient: 'Demo Bemor',
+          };
+          setUser(null);
+          setUserRole(trialRole);
+          setUserProfile({
+            role: trialRole,
+            email: 'demo@trial.uz',
+            displayName: names[trialRole],
+            profileComplete: true,
+            createdAt: new Date().toISOString(),
+          } as BaseUser);
+          setProfileComplete(true);
+          setLoading(false);
+          return;
+        }
+      }
+      // ── END TRIAL MODE ───────────────────────────────────────────────────────
+
       setUser(firebaseUser);
 
       if (firebaseUser) {
