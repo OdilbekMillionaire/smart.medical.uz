@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 import { getAllUsers, getAllClinics, getAllDocuments, getAllComplaints } from '@/lib/firestore';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -24,13 +25,14 @@ interface PlatformStats {
 const MONTH_NAMES = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'Iyun', 'Iyul', 'Avg', 'Sen', 'Okt', 'Noy', 'Dek'];
 
 export default function StatisticsPage() {
-  const { userRole } = useAuth();
+  const { userRole, loading } = useAuth();
+  const router = useRouter();
   const [stats, setStats] = useState<PlatformStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
 
   useEffect(() => {
     if (userRole !== 'admin') return;
-    setLoading(true);
+    setDataLoading(true);
     Promise.all([
       getAllUsers(),
       getAllClinics(),
@@ -49,7 +51,7 @@ export default function StatisticsPage() {
         openComplaints: complaints.filter((c) => c.status === 'open').length,
         resolvedComplaints: complaints.filter((c) => c.status === 'resolved' || c.status === 'closed').length,
       });
-    }).catch(() => toast.error('Yuklashda xato')).finally(() => setLoading(false));
+    }).catch(() => toast.error('Yuklashda xato')).finally(() => setDataLoading(false));
   }, [userRole]);
 
   // Monthly activity (simulated from current month distribution)
@@ -59,16 +61,13 @@ export default function StatisticsPage() {
   });
   const maxVal = Math.max(...months.map((m) => m.value), 1);
 
-  if (userRole !== 'admin') {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="text-center">
-          <AlertTriangle className="w-12 h-12 text-red-300 mx-auto mb-3" />
-          <p className="text-slate-500">Bu sahifaga faqat adminlar kirishi mumkin</p>
-        </div>
-      </div>
-    );
-  }
+  useEffect(() => {
+    if (!loading && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
+
+  if (loading || userRole !== 'admin') return null;
 
   return (
     <div className="space-y-6">
@@ -77,7 +76,7 @@ export default function StatisticsPage() {
         <p className="text-sm text-muted-foreground mt-1">Umumiy platformadan foydalanish ko&apos;rsatkichlari</p>
       </div>
 
-      {loading ? (
+      {dataLoading ? (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">{[1,2,3,4,5,6,7,8].map((i) => <Skeleton key={i} className="h-28 rounded-xl" />)}</div>
       ) : stats ? (
         <>

@@ -1,10 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { getVaccinationsByPatient, getVaccinationsByClinic, createVaccination } from '@/lib/firestore';
-import type { VaccinationRecord, PatientUser } from '@/types';
+import type { VaccinationRecord } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -18,6 +17,22 @@ import {
 } from 'lucide-react';
 
 type LK = 'uz' | 'uz_cyrillic' | 'ru' | 'en' | 'kk';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 const L: Record<LK, {
   title: string; subtitle: string; addBtn: string;
@@ -177,22 +192,23 @@ export default function VaccinationsPage() {
   const [showWHO, setShowWHO] = useState(false);
 
   const isClinic = userRole === 'clinic' || userRole === 'admin';
-  const patient = userProfile as PatientUser | null;
   const today = new Date().toISOString().split('T')[0];
 
-  async function load() {
-    if (!user) return;
+  const load = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const data = isClinic
-        ? await getVaccinationsByClinic(user.uid)
-        : await getVaccinationsByPatient(user.uid);
-      setRecords(data);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ records: VaccinationRecord[] }>('/api/vaccinations', token);
+      setRecords(data.records);
     } catch { toast.error(tx.loadError); }
     finally { setLoading(false); }
-  }
+  }, [tx.loadError, user]);
 
-  useEffect(() => { load(); }, [user, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   async function handleCreate() {
     if (!user || !form.vaccineName || !form.dateGiven) {
@@ -200,11 +216,12 @@ export default function VaccinationsPage() {
     }
     setSaving(true);
     try {
-      const patientName = isClinic ? form.patientName : (patient?.fullName ?? userProfile?.displayName ?? '');
-      await createVaccination({
-        clinicId: isClinic ? user.uid : (userProfile as { linkedClinicId?: string })?.linkedClinicId ?? user.uid,
-        patientId: isClinic ? `manual_${Date.now()}` : user.uid,
-        patientName,
+      const token = await user.getIdToken();
+      await requestJson<VaccinationRecord>('/api/vaccinations', token, {
+        method: 'POST',
+        body: JSON.stringify({
+        clinicId: isClinic ? user.uid : (userProfile as { linkedClinicId?: string } | null)?.linkedClinicId,
+        patientName: isClinic ? form.patientName : undefined,
         vaccineName: form.vaccineName,
         doseNumber: Number(form.doseNumber) || 1,
         dateGiven: form.dateGiven,
@@ -212,7 +229,7 @@ export default function VaccinationsPage() {
         batchNumber: form.batchNumber || undefined,
         administeredBy: form.administeredBy || undefined,
         notes: form.notes || undefined,
-        createdAt: new Date().toISOString(),
+      }),
       });
       toast.success(tx.saveSuccess);
       setShowForm(false); setForm(EMPTY_FORM); await load();

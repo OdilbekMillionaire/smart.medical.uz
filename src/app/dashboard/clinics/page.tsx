@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { getAllClinics } from '@/lib/firestore';
 import { Card, CardContent } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { toast } from 'sonner';
@@ -12,6 +11,9 @@ import { Building2, Search, Users, Phone } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { ClinicUser } from '@/types';
+import { PageHeader } from '@/components/shared/PageHeader';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { SkeletonList } from '@/components/shared/SkeletonList';
 
 export default function ClinicsPage() {
   const { userRole } = useAuth();
@@ -28,7 +30,7 @@ export default function ClinicsPage() {
       .then(setClinics)
       .catch(() => toast.error(t.common.error))
       .finally(() => setLoading(false));
-  }, [userRole, router]);
+  }, [userRole, router, t.common.error]);
 
   const filtered = clinics.filter(
     (c) =>
@@ -38,33 +40,25 @@ export default function ClinicsPage() {
   );
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold">{t.clinics.title}</h1>
-        <p className="text-sm text-muted-foreground">{t.clinics.subtitle}</p>
-      </div>
+    <div className="space-y-5">
+      <PageHeader
+        icon={<Building2 className="w-6 h-6 text-blue-600" />}
+        title={t.clinics.title}
+        subtitle={t.clinics.subtitle}
+      />
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={t.clinics.searchPlaceholder}
-          className="pl-9"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+        <Input placeholder={t.clinics.searchPlaceholder} className="pl-9" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
 
       {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <Card key={i}><CardContent className="p-4"><Skeleton className="h-16 w-full" /></CardContent></Card>
-          ))}
-        </div>
+        <SkeletonList count={4} />
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <Building2 className="h-12 w-12 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">{t.clinics.empty}</p>
-        </div>
+        <EmptyState
+          icon={<Building2 className="w-12 h-12" />}
+          title={t.clinics.empty}
+        />
       ) : (
         <div className="space-y-3">
           {filtered.map((clinic, idx) => (

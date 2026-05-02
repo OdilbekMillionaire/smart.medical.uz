@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getAnnouncementsByClinic, getAllAnnouncements, createAnnouncement, deleteAnnouncement } from '@/lib/firestore';
 import type { Announcement } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -19,8 +18,24 @@ const PRIORITY_META: Record<Announcement['priority'], { label: string; color: st
 
 const EMPTY = { title: '', body: '', priority: 'normal' as Announcement['priority'], pinned: false, targetRole: 'all', expiresAt: '' };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function AnnouncementsPage() {
-  const { user, userRole, userProfile } = useAuth();
+  const { user, userRole } = useAuth();
   const [announcements, setAnnouncements] = useState<Announcement[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
@@ -29,27 +44,27 @@ export default function AnnouncementsPage() {
 
   const canCreate = userRole === 'clinic' || userRole === 'admin';
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const data = userRole === 'admin' ? await getAllAnnouncements() : await getAnnouncementsByClinic(user.uid);
-      setAnnouncements(data);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ announcements: Announcement[] }>('/api/announcements', token);
+      setAnnouncements(data.announcements);
     } catch { toast.error('Yuklashda xato'); }
     finally { setLoading(false); }
-  }
+  }, [user]);
 
-  useEffect(() => { load(); }, [user, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   async function handleCreate() {
     if (!user || !form.title || !form.body) { toast.error('Sarlavha va matn majburiy'); return; }
     setSaving(true);
     try {
-      await createAnnouncement({
-        clinicId: user.uid, authorId: user.uid,
-        authorName: userProfile?.displayName ?? user.email ?? '',
-        ...form, expiresAt: form.expiresAt || undefined,
-        createdAt: new Date().toISOString(),
+      const token = await user.getIdToken();
+      await requestJson<Announcement>('/api/announcements', token, {
+        method: 'POST',
+        body: JSON.stringify({ ...form, expiresAt: form.expiresAt || undefined }),
       });
       toast.success('E\'lon qo\'shildi');
       setShowForm(false); setForm(EMPTY); await load();
@@ -61,6 +76,20 @@ export default function AnnouncementsPage() {
   const regular = announcements.filter((a) => !a.pinned);
   const now = new Date().toISOString();
   const active = announcements.filter((a) => !a.expiresAt || a.expiresAt > now);
+
+  async function handleDelete(id: string) {
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/announcements', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
+      await load();
+    } catch {
+      toast.error('O\'chirishda xato');
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -111,7 +140,7 @@ export default function AnnouncementsPage() {
         <div>
           <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1"><Pin className="w-3 h-3" />Mahkamlangan</p>
           <div className="space-y-3">
-            {pinned.map((a) => <AnnouncementCard key={a.id} a={a} canDelete={canCreate} onDelete={() => deleteAnnouncement(a.id).then(load)} />)}
+            {pinned.map((a) => <AnnouncementCard key={a.id} a={a} canDelete={canCreate} onDelete={() => handleDelete(a.id)} />)}
           </div>
         </div>
       )}
@@ -121,7 +150,7 @@ export default function AnnouncementsPage() {
         <div>
           {pinned.length > 0 && <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2">Barchasi</p>}
           <div className="space-y-3">
-            {regular.map((a) => <AnnouncementCard key={a.id} a={a} canDelete={canCreate} onDelete={() => deleteAnnouncement(a.id).then(load)} />)}
+            {regular.map((a) => <AnnouncementCard key={a.id} a={a} canDelete={canCreate} onDelete={() => handleDelete(a.id)} />)}
           </div>
         </div>
       )}

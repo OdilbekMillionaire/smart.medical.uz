@@ -1,14 +1,14 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useMemo, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { getFirebaseDb, getFirebaseStorage } from '@/lib/firebase';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { useLanguage } from '@/contexts/LanguageContext';
+import { getFirebaseStorage } from '@/lib/firebase';
 import { ref, uploadBytesResumable, getDownloadURL } from 'firebase/storage';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -64,31 +64,42 @@ const SPECIALTIES = [
   'Endokrinologiya',
 ];
 
-const step1Schema = z.object({
-  clinicName: z.string().min(2, 'Klinika nomi kamida 2 ta belgi'),
-  licenseNumber: z.string().min(3, 'Litsenziya raqami kiritilishi shart'),
-  licenseExpiry: z.string().min(1, 'Litsenziya muddati kiritilishi shart'),
-  region: z.string().min(1, 'Viloyatni tanlang'),
-  district: z.string().min(2, 'Tumanni kiriting'),
-  address: z.string().min(5, 'To\'liq manzilni kiriting'),
-});
+type Step1Data = {
+  clinicName: string;
+  licenseNumber: string;
+  licenseExpiry: string;
+  region: string;
+  district: string;
+  address: string;
+};
 
-const step2Schema = z.object({
-  contactPerson: z.string().min(2, 'Mas\'ul shaxs ismini kiriting'),
-  phone: z
-    .string()
-    .min(9, 'Telefon raqamini kiriting')
-    .regex(/^\+?[0-9\s\-()]+$/, "Noto'g'ri telefon raqami"),
-  doctorCount: z.number().min(0, 'Manfiy bo\'lmasligi kerak'),
-  nurseCount: z.number().min(0, 'Manfiy bo\'lmasligi kerak'),
-  adminCount: z.number().min(0, 'Manfiy bo\'lmasligi kerak'),
-});
+type Step2Data = {
+  contactPerson: string;
+  phone: string;
+  doctorCount: number;
+  nurseCount: number;
+  adminCount: number;
+};
 
-type Step1Data = z.infer<typeof step1Schema>;
-type Step2Data = z.infer<typeof step2Schema>;
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 export default function ClinicOnboardingPage() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const router = useRouter();
   const [currentStep, setCurrentStep] = useState(1);
   const [step1Data, setStep1Data] = useState<Step1Data | null>(null);
@@ -102,6 +113,31 @@ export default function ClinicOnboardingPage() {
 
   const licenseRef = useRef<HTMLInputElement>(null);
   const sanCertRef = useRef<HTMLInputElement>(null);
+
+  const step1Schema = useMemo(
+    () => z.object({
+      clinicName: z.string().min(2, t.common.required),
+      licenseNumber: z.string().min(3, t.common.required),
+      licenseExpiry: z.string().min(1, t.common.required),
+      region: z.string().min(1, t.common.required),
+      district: z.string().min(2, t.common.required),
+      address: z.string().min(5, t.common.required),
+    }),
+    [t]
+  );
+  const step2Schema = useMemo(
+    () => z.object({
+      contactPerson: z.string().min(2, t.common.required),
+      phone: z
+        .string()
+        .min(9, t.common.required)
+        .regex(/^\+?[0-9\s\-()]+$/, t.common.error),
+      doctorCount: z.number().min(0, t.common.error),
+      nurseCount: z.number().min(0, t.common.error),
+      adminCount: z.number().min(0, t.common.error),
+    }),
+    [t]
+  );
 
   const form1 = useForm<Step1Data>({ resolver: zodResolver(step1Schema) });
   const form2 = useForm<Step2Data>({
@@ -122,7 +158,7 @@ export default function ClinicOnboardingPage() {
 
   function onStep2Submit(data: Step2Data) {
     if (selectedSpecialties.length === 0) {
-      toast.error('Kamida bitta mutaxassislikni tanlang');
+      toast.error(t.onboarding.chooseSpecialtyRequired);
       return;
     }
     setStep2Data(data);
@@ -154,11 +190,11 @@ export default function ClinicOnboardingPage() {
   async function handleFinalSubmit() {
     if (!user || !step1Data || !step2Data) return;
     if (!licenseFile) {
-      toast.error('Litsenziya faylini yuklang');
+      toast.error(t.onboarding.licenseFileRequired);
       return;
     }
     if (!sanCertFile) {
-      toast.error('Sanitariya sertifikati faylini yuklang');
+      toast.error(t.onboarding.sanCertFileRequired);
       return;
     }
 
@@ -177,42 +213,31 @@ export default function ClinicOnboardingPage() {
         ),
       ]);
 
-      const clinicData = {
-        uid: user.uid,
-        email: user.email ?? '',
-        displayName: step1Data.clinicName,
-        role: 'clinic' as const,
-        profileComplete: true,
-        createdAt: new Date().toISOString(),
-        clinicName: step1Data.clinicName,
-        licenseNumber: step1Data.licenseNumber,
-        licenseExpiry: step1Data.licenseExpiry,
-        address: step1Data.address,
-        region: step1Data.region,
-        district: step1Data.district,
-        specialties: selectedSpecialties,
-        doctorCount: step2Data.doctorCount,
-        nurseCount: step2Data.nurseCount,
-        adminCount: step2Data.adminCount,
-        contactPerson: step2Data.contactPerson,
-        phone: step2Data.phone,
-        documents: { license: licenseUrl, sanCert: sanCertUrl },
-        updatedAt: new Date().toISOString(),
-      };
-
-      await Promise.all([
-        setDoc(doc(getFirebaseDb(), 'clinics', user.uid), clinicData),
-        updateDoc(doc(getFirebaseDb(), 'users', user.uid), {
-          profileComplete: true,
-          displayName: step1Data.clinicName,
-          updatedAt: new Date().toISOString(),
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/onboarding', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          role: 'clinic',
+          clinicName: step1Data.clinicName,
+          licenseNumber: step1Data.licenseNumber,
+          licenseExpiry: step1Data.licenseExpiry,
+          address: step1Data.address,
+          region: step1Data.region,
+          district: step1Data.district,
+          specialties: selectedSpecialties,
+          doctorCount: step2Data.doctorCount,
+          nurseCount: step2Data.nurseCount,
+          adminCount: step2Data.adminCount,
+          contactPerson: step2Data.contactPerson,
+          phone: step2Data.phone,
+          documents: { license: licenseUrl, sanCert: sanCertUrl },
         }),
-      ]);
+      });
 
-      toast.success('Profil muvaffaqiyatli yaratildi!');
+      toast.success(t.onboarding.success);
       router.replace('/dashboard');
     } catch {
-      toast.error('Xato yuz berdi. Qayta urinib ko\'ring');
+      toast.error(t.common.error);
     } finally {
       setUploading(false);
     }
@@ -223,45 +248,45 @@ export default function ClinicOnboardingPage() {
   return (
     <div className="space-y-6">
       <div className="text-center">
-        <h1 className="text-2xl font-bold">Klinika profilini to&apos;ldiring</h1>
-        <p className="text-muted-foreground mt-1">Qadam {currentStep} / 3</p>
+        <h1 className="text-2xl font-bold">{t.onboarding.clinic.title}</h1>
+        <p className="text-muted-foreground mt-1">{t.onboarding.stepLabel} {currentStep} / 3</p>
       </div>
       <Progress value={progress} className="h-2" />
 
       {currentStep === 1 && (
         <Card>
           <CardHeader>
-            <CardTitle>Asosiy ma'lumotlar</CardTitle>
-            <CardDescription>Klinikangiz haqida asosiy ma'lumotlarni kiriting</CardDescription>
+            <CardTitle>{t.onboarding.basicInfo}</CardTitle>
+            <CardDescription>{t.onboarding.clinicBasicDesc}</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={form1.handleSubmit(onStep1Submit)} className="space-y-4">
               <div className="space-y-2">
-                <Label>Klinika nomi</Label>
-                <Input placeholder="Klinikangiz to'liq nomi" {...form1.register('clinicName')} />
+                <Label>{t.onboarding.clinic.name}</Label>
+                <Input placeholder={t.onboarding.clinic.name} {...form1.register('clinicName')} />
                 {form1.formState.errors.clinicName && (
                   <p className="text-sm text-red-500">{form1.formState.errors.clinicName.message}</p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Litsenziya raqami</Label>
+                <Label>{t.onboarding.clinic.license}</Label>
                 <Input placeholder="LTS-12345" {...form1.register('licenseNumber')} />
                 {form1.formState.errors.licenseNumber && (
                   <p className="text-sm text-red-500">{form1.formState.errors.licenseNumber.message}</p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Litsenziya muddati</Label>
+                <Label>{t.onboarding.clinic.licenseExpiry}</Label>
                 <Input type="date" {...form1.register('licenseExpiry')} />
                 {form1.formState.errors.licenseExpiry && (
                   <p className="text-sm text-red-500">{form1.formState.errors.licenseExpiry.message}</p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Viloyat</Label>
+                <Label>{t.onboarding.clinic.region}</Label>
                 <Select onValueChange={(v: string | null) => { if (v) form1.setValue('region', v); }}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Viloyatni tanlang" />
+                    <SelectValue placeholder={t.onboarding.clinic.region} />
                   </SelectTrigger>
                   <SelectContent>
                     {UZBEKISTAN_REGIONS.map((r) => (
@@ -274,20 +299,20 @@ export default function ClinicOnboardingPage() {
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Tuman</Label>
-                <Input placeholder="Tuman nomi" {...form1.register('district')} />
+                <Label>{t.onboarding.clinic.district}</Label>
+                <Input placeholder={t.onboarding.clinic.district} {...form1.register('district')} />
                 {form1.formState.errors.district && (
                   <p className="text-sm text-red-500">{form1.formState.errors.district.message}</p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label>To'liq manzil</Label>
-                <Input placeholder="Ko'cha, uy raqami" {...form1.register('address')} />
+                <Label>{t.onboarding.clinic.address}</Label>
+                <Input placeholder={t.onboarding.clinic.address} {...form1.register('address')} />
                 {form1.formState.errors.address && (
                   <p className="text-sm text-red-500">{form1.formState.errors.address.message}</p>
                 )}
               </div>
-              <Button type="submit" className="w-full">Davom etish</Button>
+              <Button type="submit" className="w-full">{t.common.next}</Button>
             </form>
           </CardContent>
         </Card>
@@ -296,13 +321,13 @@ export default function ClinicOnboardingPage() {
       {currentStep === 2 && (
         <Card>
           <CardHeader>
-            <CardTitle>Xodimlar va mutaxassisliklar</CardTitle>
-            <CardDescription>Klinikangizning xodimlar tarkibi va mutaxassisliklari</CardDescription>
+            <CardTitle>{t.onboarding.staffSpecialties}</CardTitle>
+            <CardDescription>{t.onboarding.clinic.specialties}</CardDescription>
           </CardHeader>
           <CardContent>
             <form onSubmit={form2.handleSubmit(onStep2Submit)} className="space-y-4">
               <div className="space-y-2">
-                <Label>Mutaxassisliklar</Label>
+                <Label>{t.onboarding.clinic.specialties}</Label>
                 <div className="flex flex-wrap gap-2">
                   {SPECIALTIES.map((s) => (
                     <button
@@ -322,27 +347,27 @@ export default function ClinicOnboardingPage() {
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label>Shifokorlar</Label>
+                  <Label>{t.onboarding.clinic.doctorCount}</Label>
                   <Input type="number" min="0" placeholder="0" {...form2.register('doctorCount', { valueAsNumber: true })} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Hamshiralar</Label>
+                  <Label>{t.onboarding.clinic.nurseCount}</Label>
                   <Input type="number" min="0" placeholder="0" {...form2.register('nurseCount', { valueAsNumber: true })} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Ma'murlar</Label>
+                  <Label>{t.onboarding.adminCount}</Label>
                   <Input type="number" min="0" placeholder="0" {...form2.register('adminCount', { valueAsNumber: true })} />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Mas'ul shaxs (F.I.O.)</Label>
-                <Input placeholder="To'liq ism" {...form2.register('contactPerson')} />
+                <Label>{t.onboarding.clinic.contactPerson}</Label>
+                <Input placeholder={t.onboarding.clinic.contactPerson} {...form2.register('contactPerson')} />
                 {form2.formState.errors.contactPerson && (
                   <p className="text-sm text-red-500">{form2.formState.errors.contactPerson.message}</p>
                 )}
               </div>
               <div className="space-y-2">
-                <Label>Telefon raqami</Label>
+                <Label>{t.onboarding.clinic.phone}</Label>
                 <Input placeholder="+998 90 123 45 67" {...form2.register('phone')} />
                 {form2.formState.errors.phone && (
                   <p className="text-sm text-red-500">{form2.formState.errors.phone.message}</p>
@@ -350,9 +375,9 @@ export default function ClinicOnboardingPage() {
               </div>
               <div className="flex gap-3">
                 <Button type="button" variant="outline" className="flex-1" onClick={() => setCurrentStep(1)}>
-                  Orqaga
+                  {t.common.back}
                 </Button>
-                <Button type="submit" className="flex-1">Davom etish</Button>
+                <Button type="submit" className="flex-1">{t.common.next}</Button>
               </div>
             </form>
           </CardContent>
@@ -362,12 +387,12 @@ export default function ClinicOnboardingPage() {
       {currentStep === 3 && (
         <Card>
           <CardHeader>
-            <CardTitle>Hujjatlarni yuklash</CardTitle>
-            <CardDescription>Litsenziya va sanitariya sertifikatini PDF formatida yuklang</CardDescription>
+            <CardTitle>{t.onboarding.uploadDocuments}</CardTitle>
+            <CardDescription>{t.onboarding.clinicUploadDesc}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
             <div className="space-y-3">
-              <Label>Litsenziya (PDF)</Label>
+              <Label>{t.onboarding.licenseFile} (PDF)</Label>
               <div
                 className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 p-6 transition-colors hover:border-slate-500"
                 onClick={() => licenseRef.current?.click()}
@@ -376,8 +401,8 @@ export default function ClinicOnboardingPage() {
                   <p className="text-sm font-medium text-green-600">{licenseFile.name}</p>
                 ) : (
                   <>
-                    <p className="text-sm text-muted-foreground">PDF faylni tanlash uchun bosing</p>
-                    <p className="text-xs text-muted-foreground mt-1">Faqat PDF, max 10MB</p>
+                    <p className="text-sm text-muted-foreground">{t.onboarding.choosePdf}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t.onboarding.pdfOnly}</p>
                   </>
                 )}
               </div>
@@ -397,7 +422,7 @@ export default function ClinicOnboardingPage() {
             </div>
 
             <div className="space-y-3">
-              <Label>Sanitariya sertifikati (PDF)</Label>
+              <Label>{t.onboarding.sanCertificateFile} (PDF)</Label>
               <div
                 className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed border-slate-300 p-6 transition-colors hover:border-slate-500"
                 onClick={() => sanCertRef.current?.click()}
@@ -406,8 +431,8 @@ export default function ClinicOnboardingPage() {
                   <p className="text-sm font-medium text-green-600">{sanCertFile.name}</p>
                 ) : (
                   <>
-                    <p className="text-sm text-muted-foreground">PDF faylni tanlash uchun bosing</p>
-                    <p className="text-xs text-muted-foreground mt-1">Faqat PDF, max 10MB</p>
+                    <p className="text-sm text-muted-foreground">{t.onboarding.choosePdf}</p>
+                    <p className="text-xs text-muted-foreground mt-1">{t.onboarding.pdfOnly}</p>
                   </>
                 )}
               </div>
@@ -428,16 +453,16 @@ export default function ClinicOnboardingPage() {
 
             <div className="flex gap-3">
               <Button type="button" variant="outline" className="flex-1" onClick={() => setCurrentStep(2)} disabled={uploading}>
-                Orqaga
+                {t.common.back}
               </Button>
               <Button className="flex-1" onClick={handleFinalSubmit} disabled={uploading}>
                 {uploading ? (
                   <span className="flex items-center gap-2">
                     <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                    Yuklanmoqda...
+                    {t.onboarding.uploading}
                   </span>
                 ) : (
-                  'Profilni yaratish'
+                  t.onboarding.createProfile
                 )}
               </Button>
             </div>

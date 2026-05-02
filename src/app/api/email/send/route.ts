@@ -1,32 +1,27 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth } from '@/lib/firebase-admin';
+import { isApiError, parseJson, requireApiUser, requireRole } from '@/lib/api-auth';
+import { z } from 'zod';
+
+const SendEmailSchema = z.object({
+  to: z.union([z.string().email(), z.array(z.string().email()).min(1).max(50)]),
+  subject: z.string().trim().min(1).max(300),
+  html: z.string().min(1).max(100000),
+});
 
 export async function POST(req: NextRequest) {
-  // Verify auth
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  try {
-    await getAdminAuth().verifyIdToken(authHeader.slice(7));
-  } catch {
-    return NextResponse.json({ error: 'Invalid token' }, { status: 401 });
-  }
+  const auth = await requireApiUser(req);
+  if (isApiError(auth)) return auth;
+  const roleError = requireRole(auth, ['admin']);
+  if (roleError) return roleError;
 
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'Email service not configured' }, { status: 503 });
   }
 
-  const { to, subject, html } = await req.json() as {
-    to: string | string[];
-    subject: string;
-    html: string;
-  };
-
-  if (!to || !subject || !html) {
-    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 });
-  }
+  const body = await parseJson(req, SendEmailSchema);
+  if (body instanceof NextResponse) return body;
+  const { to, subject, html } = body;
 
   const fromEmail = process.env.RESEND_FROM_EMAIL ?? 'onboarding@resend.dev';
 

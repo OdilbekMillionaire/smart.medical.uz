@@ -1,15 +1,12 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getInspectionByClinic, getAllInspections } from '@/lib/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { ShieldCheck, ShieldAlert, ShieldX, Plus, ChevronDown, ChevronUp, Printer, Sparkles, Bot } from 'lucide-react';
-import { getAuth } from 'firebase/auth';
-import { getFirebaseAuth } from '@/lib/firebase';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { printInspectionReport } from '@/lib/export';
 import type { InspectionRecord, InspectionItem } from '@/types';
@@ -36,15 +33,24 @@ function buildChecklist(
 
 const RISK_COLORS = { high: 'text-red-600', medium: 'text-orange-500', low: 'text-green-600' };
 
-async function getToken(): Promise<string> {
-  const auth = getFirebaseAuth();
-  const user = getAuth(auth.app).currentUser;
-  if (!user) throw new Error('Not authenticated');
-  return user.getIdToken();
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
 }
 
 export default function InspectionPage() {
-  const { user, userRole } = useAuth();
+  const { user } = useAuth();
   const { t } = useLanguage();
   const CHECKLIST_LABELS: Record<InspectionRecord['checklistType'], string> = {
     sanitation: t.inspection.categories.sanitation,
@@ -63,6 +69,20 @@ export default function InspectionPage() {
   const [remediations, setRemediations] = useState<Record<string, string>>({});
   const [remediatingId, setRemediatingId] = useState<string | null>(null);
 
+  const loadRecords = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ records: InspectionRecord[] }>('/api/inspection', token);
+      setRecords(data.records);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setLoading(false);
+    }
+  }, [t.common.error, user]);
+
   async function handleRemediate(rec: InspectionRecord) {
     const failedItems = rec.items.filter((i) => i.status !== 'pass');
     if (failedItems.length === 0) {
@@ -71,7 +91,8 @@ export default function InspectionPage() {
     }
     setRemediatingId(rec.id);
     try {
-      const token = await getToken();
+      if (!user) return;
+      const token = await user.getIdToken();
       const res = await fetch('/api/inspection/remediate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
@@ -99,13 +120,8 @@ export default function InspectionPage() {
   }
 
   useEffect(() => {
-    if (!user) return;
-    const load = userRole === 'admin' ? getAllInspections : () => getInspectionByClinic(user.uid);
-    load()
-      .then(setRecords)
-      .catch(() => toast.error(t.common.error))
-      .finally(() => setLoading(false));
-  }, [user, userRole]);
+    loadRecords();
+  }, [loadRecords]);
 
   function selectType(type: InspectionRecord['checklistType']) {
     setSelectedType(type);
@@ -128,20 +144,17 @@ export default function InspectionPage() {
     if (!user) return;
     setSubmitting(true);
     try {
-      const token = await getToken();
-      const res = await fetch('/api/inspection', {
+      const token = await user.getIdToken();
+      const newRecord = await requestJson<InspectionRecord>('/api/inspection', token, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
         body: JSON.stringify({ checklistType: selectedType, items }),
       });
-      if (!res.ok) throw new Error('Server error');
-      const newRecord = await res.json() as InspectionRecord;
       setRecords((prev) => [newRecord, ...prev]);
       setShowForm(false);
       setExpandedId(newRecord.id);
       toast.success(t.common.success);
-    } catch {
-      toast.error(t.common.error);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
     } finally {
       setSubmitting(false);
     }
@@ -170,7 +183,7 @@ export default function InspectionPage() {
 
       {/* New inspection form */}
       {showForm && (
-        <Card className="border-2 border-slate-900">
+        <Card className="border-2 border-blue-500">
           <CardHeader>
             <CardTitle>{t.inspection.checklist}</CardTitle>
           </CardHeader>
@@ -183,8 +196,8 @@ export default function InspectionPage() {
                   onClick={() => selectType(t)}
                   className={`rounded-lg border-2 p-3 text-sm font-medium transition-colors ${
                     selectedType === t
-                      ? 'border-slate-900 bg-slate-900 text-white'
-                      : 'border-slate-200 hover:border-slate-400'
+                      ? 'border-blue-600 bg-blue-600 text-white'
+                      : 'border-slate-200 hover:border-blue-400 text-slate-700'
                   }`}
                 >
                   {CHECKLIST_LABELS[t]}

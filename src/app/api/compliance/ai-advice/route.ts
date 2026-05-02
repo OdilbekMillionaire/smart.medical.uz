@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin';
+import { getAdminDb } from '@/lib/firebase-admin';
 import { generateForTask, COMPLIANCE_ADVISOR_PROMPT } from '@/lib/vertex-ai';
-import type { ComplianceItem, UserRole } from '@/types';
+import { isApiError, parseJson, requireApiUser, requireRole } from '@/lib/api-auth';
+import { z } from 'zod';
+import type { ComplianceItem } from '@/types';
+
+const AdviceSchema = z.object({
+  clinicId: z.string().trim().min(1).max(128).optional(),
+});
 
 // ── Feature 4: AI Compliance Smart Advisor ───────────────────────────────────
 // Model: Gemini 2.5 Pro (complex analysis)
@@ -10,26 +16,25 @@ import type { ComplianceItem, UserRole } from '@/types';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    const role = decoded.role as UserRole;
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
+    const roleError = requireRole(auth, ['admin', 'clinic']);
+    if (roleError) return roleError;
     const db = getAdminDb();
 
-    const body = await req.json() as { clinicId?: string };
-    const targetClinicId = role === 'admin' && body.clinicId ? body.clinicId : decoded.uid;
+    const body = await parseJson(req, AdviceSchema);
+    if (body instanceof NextResponse) return body;
+    const targetClinicId = auth.role === 'admin' && body.clinicId ? body.clinicId : auth.uid;
 
     // Fetch all compliance items for this clinic
     const snapshot = await db
       .collection('compliance')
       .where('clinicId', '==', targetClinicId)
-      .orderBy('dueDate', 'asc')
       .get();
 
-    const items = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as ComplianceItem));
+    const items = snapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() } as ComplianceItem))
+      .sort((a, b) => a.dueDate.localeCompare(b.dueDate));
 
     if (items.length === 0) {
       return NextResponse.json({

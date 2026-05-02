@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -26,12 +26,14 @@ import { doc, getDoc } from 'firebase/firestore';
 import { getFirebaseDb } from '@/lib/firebase';
 import type { BaseUser } from '@/types';
 
-const loginSchema = z.object({
-  email: z.string().min(1, 'Email kiritilishi shart').email("Noto'g'ri email format"),
-  password: z.string().min(1, 'Parol kiritilishi shart'),
-});
+type LoginFormData = {
+  email: string;
+  password: string;
+};
 
-type LoginFormData = z.infer<typeof loginSchema>;
+const TRIAL_MODE_ENABLED =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_DISABLE_TRIAL_MODE !== 'true';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -40,6 +42,13 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
 
   const { t } = useLanguage();
+  const loginSchema = useMemo(
+    () => z.object({
+      email: z.string().min(1, t.auth.validation.emailRequired).email(t.auth.validation.emailInvalid),
+      password: z.string().min(1, t.auth.validation.passwordRequired),
+    }),
+    [t]
+  );
   const { register, handleSubmit, formState: { errors } } = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
   });
@@ -55,7 +64,7 @@ export default function LoginPage() {
       } catch (err: unknown) {
         console.error('[Google redirect error]', err);
         const msg = err instanceof Error ? err.message : '';
-        toast.error(`Google xatosi: ${msg}`);
+        toast.error(`${t.auth.googleError}: ${msg}`);
       }
     }
     handleRedirectResult();
@@ -88,13 +97,13 @@ export default function LoginPage() {
       console.error('[Email login error]', err);
       const msg = err instanceof Error ? err.message : '';
       if (msg.includes('invalid-credential') || msg.includes('wrong-password')) {
-        toast.error("Email yoki parol noto'g'ri");
+        toast.error(t.auth.invalidCredential);
       } else if (msg.includes('user-not-found')) {
-        toast.error('Foydalanuvchi topilmadi');
+        toast.error(t.auth.userNotFound);
       } else if (msg.includes('too-many-requests')) {
-        toast.error("Juda ko'p urinish. Biroz kuting");
+        toast.error(t.auth.tooManyRequests);
       } else {
-        toast.error(`Kirish xatosi: ${msg}`);
+        toast.error(`${t.auth.signInError}: ${msg}`);
       }
     } finally {
       setLoading(false);
@@ -110,12 +119,18 @@ export default function LoginPage() {
       }
     } catch (err: unknown) {
       console.error('[Google login error]', err);
-      toast.error(`Google kirish xatosi: ${err instanceof Error ? err.message : err}`);
+      toast.error(`${t.auth.googleError}: ${err instanceof Error ? err.message : err}`);
       setGoogleLoading(false);
     }
   }
 
-  function enterTrialMode(role: 'admin' | 'clinic' | 'doctor' | 'patient') {
+  async function enterTrialMode(role: 'admin' | 'clinic' | 'doctor' | 'patient') {
+    if (!TRIAL_MODE_ENABLED) {
+      toast.error(t.auth.demoModeDisabled);
+      return;
+    }
+    // Sign out any real Firebase user so trial mode takes full effect
+    try { const { getFirebaseAuth } = await import('@/lib/firebase'); const { signOut } = await import('firebase/auth'); await signOut(getFirebaseAuth()); } catch { /* ignore */ }
     localStorage.setItem('trial_role', role);
     router.push('/dashboard');
   }
@@ -124,8 +139,16 @@ export default function LoginPage() {
     { role: 'admin'   as const, icon: '🛡️', label: 'Admin' },
     { role: 'clinic'  as const, icon: '🏥', label: 'Klinika' },
     { role: 'doctor'  as const, icon: '👨‍⚕️', label: 'Shifokor' },
-    { role: 'patient' as const, icon: '👤', label: 'Bemor' },
+    { role: 'patient' as const, icon: '👤', label: 'Foydalanuvchi' },
   ];
+
+  const roleInitials = { admin: 'A', clinic: 'C', doctor: 'D', patient: 'P' } as const;
+  const roleLabels = {
+    admin: t.auth.roleAdmin,
+    clinic: t.auth.roleClinic,
+    doctor: t.auth.roleDoctor,
+    patient: t.auth.rolePatient,
+  } as const;
 
   return (
     <>
@@ -196,28 +219,28 @@ export default function LoginPage() {
       </CardFooter>
     </Card>
 
-    {/* ── TRIAL MODE BANNER ─────────────────────────────────────────────────── */}
+    {TRIAL_MODE_ENABLED && (
     <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4">
       <p className="text-center text-xs font-semibold text-amber-700 uppercase tracking-wider mb-3">
-        🚀 Demo rejimda kirish — hisob yaratmasdan sinab ko&apos;ring
+        {t.auth.demoModeTitle}
       </p>
       <div className="grid grid-cols-4 gap-2">
-        {TRIAL_ROLES.map(({ role, icon, label }) => (
+        {TRIAL_ROLES.map(({ role }) => (
           <button
             key={role}
             onClick={() => enterTrialMode(role)}
             className="flex flex-col items-center gap-1 rounded-lg border border-amber-200 bg-white px-2 py-3 text-center hover:border-amber-400 hover:bg-amber-50 transition-colors cursor-pointer"
           >
-            <span className="text-xl">{icon}</span>
-            <span className="text-xs font-medium text-slate-700">{label}</span>
+            <span className="flex h-7 w-7 items-center justify-center rounded-full bg-amber-100 text-xs font-bold text-amber-700">{roleInitials[role]}</span>
+            <span className="text-xs font-medium text-slate-700">{roleLabels[role]}</span>
           </button>
         ))}
       </div>
       <p className="text-center text-xs text-amber-600 mt-2">
-        Chiqish uchun brauzer localStorage ni tozalang yoki yangi hisob bilan kiring
+        {t.auth.demoModeExitHint}
       </p>
     </div>
-    {/* ── END TRIAL MODE BANNER ─────────────────────────────────────────────── */}
+    )}
     </>
   );
 }

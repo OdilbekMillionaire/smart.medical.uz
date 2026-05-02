@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { createRequest } from '@/lib/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -13,6 +12,23 @@ import { toast } from 'sonner';
 import { ArrowLeft, Send } from 'lucide-react';
 import Link from 'next/link';
 import { useLanguage } from '@/contexts/LanguageContext';
+import type { Request } from '@/types';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 export default function NewRequestPage() {
   const { user } = useAuth();
@@ -29,18 +45,18 @@ export default function NewRequestPage() {
 
     setSaving(true);
     try {
-      const id = await createRequest({
-        fromUserId: user.uid,
-        toAdminId: 'admin',
-        subject: subject.trim(),
-        body: body.trim(),
-        status: 'received',
-        createdAt: new Date().toISOString(),
+      const token = await user.getIdToken();
+      const created = await requestJson<Request>('/api/requests', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          subject: subject.trim(),
+          body: body.trim(),
+        }),
       });
       toast.success(t.common.success);
-      router.push(`/dashboard/requests/${id}`);
-    } catch {
-      toast.error(t.common.error);
+      router.push(`/dashboard/requests/${created.id}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
     } finally {
       setSaving(false);
     }

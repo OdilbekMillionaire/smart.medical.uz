@@ -1,6 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -50,6 +52,8 @@ const URGENCY_META = {
 const EMPTY_FORM = { patientName: '', bloodType: 'A+', units: '1', urgency: 'routine' as BloodRequest['urgency'], requestedBy: '' };
 
 export default function BloodBankPage() {
+  const { userRole, loading } = useAuth();
+  const router = useRouter();
   const [stock] = useState<BloodStock[]>(INITIAL_STOCK);
   const [requests, setRequests] = useState<BloodRequest[]>(INITIAL_REQUESTS);
   const [showForm, setShowForm] = useState(false);
@@ -83,9 +87,17 @@ export default function BloodBankPage() {
     toast.success('Holat yangilandi');
   }
 
+  useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
+
   const filteredRequests = requests.filter((r) =>
     !search || r.patientName.toLowerCase().includes(search.toLowerCase()) || r.bloodType.toLowerCase().includes(search.toLowerCase())
   );
+
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
 
   return (
     <div className="space-y-5">

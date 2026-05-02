@@ -3,7 +3,6 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
-import { createComplianceItem } from '@/lib/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,6 +13,22 @@ import { ArrowLeft } from 'lucide-react';
 import Link from 'next/link';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { ComplianceItem } from '@/types';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 export default function NewCompliancePage() {
   const { user } = useAuth();
@@ -32,22 +47,19 @@ export default function NewCompliancePage() {
 
     setSaving(true);
     try {
-      const now = new Date();
-      const due = new Date(dueDate);
-      const status: ComplianceItem['status'] = due < now ? 'overdue' : 'upcoming';
-
-      await createComplianceItem({
-        clinicId: user.uid,
-        type,
-        title: title.trim(),
-        dueDate,
-        status,
-        reminderSent: false,
+      const token = await user.getIdToken();
+      await requestJson<ComplianceItem>('/api/compliance', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          type,
+          title: title.trim(),
+          dueDate,
+        }),
       });
       toast.success(t.common.success);
       router.push('/dashboard/compliance');
-    } catch {
-      toast.error(t.common.error);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
     } finally {
       setSaving(false);
     }

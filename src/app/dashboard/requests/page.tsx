@@ -1,16 +1,34 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { getRequestsByUser, getAllRequests } from '@/lib/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Plus, MessageSquare, Clock, Eye } from 'lucide-react';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { Request } from '@/types';
+import { PageHeader } from '@/components/shared/PageHeader';
+import { FilterBar } from '@/components/shared/FilterBar';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { SkeletonList } from '@/components/shared/SkeletonList';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 export default function RequestsPage() {
   const { user, userRole } = useAuth();
@@ -27,73 +45,54 @@ export default function RequestsPage() {
     closed: { label: t.requests.closed, color: 'bg-slate-100 text-slate-600' },
   };
 
-  useEffect(() => {
+  const loadRequests = useCallback(async () => {
     if (!user) return;
-    async function load() {
-      try {
-        const data = userRole === 'admin'
-          ? await getAllRequests()
-          : await getRequestsByUser(user!.uid);
-        setRequests(data);
-      } catch {
-        toast.error(t.common.error);
-      } finally {
-        setLoading(false);
-      }
+    setLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ requests: Request[] }>('/api/requests', token);
+      setRequests(data.requests);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setLoading(false);
     }
-    load();
-  }, [user, userRole]);
+  }, [t.common.error, user]);
+
+  useEffect(() => {
+    loadRequests();
+  }, [loadRequests]);
 
   const filtered = filter === 'all' ? requests : requests.filter((r) => r.status === filter);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">{t.requests.title}</h1>
-          <p className="text-sm text-muted-foreground">
-            {userRole === 'admin' ? t.requests.adminTitle : t.requests.myTitle}
-          </p>
-        </div>
-        <Link href="/dashboard/requests/new">
-          <Button>
-            <Plus className="h-4 w-4 mr-2" />
-            {t.requests.new}
-          </Button>
-        </Link>
-      </div>
+  const filterOptions = (['all', 'received', 'in_review', 'replied', 'closed'] as const).map((f) => ({
+    key: f,
+    label: f === 'all' ? t.common.all : STATUS_MAP[f].label,
+  }));
 
-      <div className="flex gap-2 flex-wrap">
-        {(['all', 'received', 'in_review', 'replied', 'closed'] as const).map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
-              filter === f
-                ? 'bg-slate-900 text-white'
-                : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-            }`}
-          >
-            {f === 'all' ? t.common.all : STATUS_MAP[f].label}
-            <span className="ml-1.5 text-xs opacity-70">
-              {f === 'all' ? requests.length : requests.filter((r) => r.status === f).length}
-            </span>
-          </button>
-        ))}
-      </div>
+  return (
+    <div className="space-y-5">
+      <PageHeader
+        icon={<MessageSquare className="w-6 h-6 text-purple-600" />}
+        title={t.requests.title}
+        subtitle={userRole === 'admin' ? t.requests.adminTitle : t.requests.myTitle}
+        actions={
+          <Link href="/dashboard/requests/new">
+            <Button className="gap-2"><Plus className="h-4 w-4" />{t.requests.new}</Button>
+          </Link>
+        }
+      />
+
+      <FilterBar options={filterOptions} value={filter} onChange={(v) => setFilter(v as Request['status'] | 'all')} />
 
       {loading ? (
-        <div className="space-y-3">
-          {[1, 2, 3].map((i) => (
-            <Card key={i}><CardContent className="p-4"><Skeleton className="h-14 w-full" /></CardContent></Card>
-          ))}
-        </div>
+        <SkeletonList count={4} />
       ) : filtered.length === 0 ? (
-        <div className="text-center py-16 text-muted-foreground">
-          <MessageSquare className="h-12 w-12 mx-auto mb-3 opacity-30" />
-          <p className="font-medium">{t.requests.empty}</p>
-          <p className="text-sm mt-1">{t.requests.emptyDesc}</p>
-        </div>
+        <EmptyState
+          icon={<MessageSquare className="w-12 h-12" />}
+          title={t.requests.empty}
+          description={t.requests.emptyDesc}
+        />
       ) : (
         <div className="space-y-3">
           {filtered.map((req) => {

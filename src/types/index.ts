@@ -68,6 +68,8 @@ export interface Document {
   type: string;
   status: 'draft' | 'pending_review' | 'approved' | 'rejected';
   content: string;
+  templateId?: string;
+  aiOpinion?: string;
   storageUrl?: string;
   createdAt: string;
   updatedAt: string;
@@ -81,7 +83,7 @@ export interface ComplianceItem {
   type: 'license' | 'certification' | 'contract' | 'protocol';
   title: string;
   dueDate: string;
-  status: 'upcoming' | 'overdue' | 'done';
+  status: 'upcoming' | 'overdue' | 'done' | 'kritik';
   reminderSent: boolean;
   autoDraftDocId?: string;
 }
@@ -204,7 +206,7 @@ export interface JobApplication {
 export interface AppNotification {
   id: string;
   userId: string;
-  type: 'document_approved' | 'document_rejected' | 'new_request' | 'request_replied' | 'compliance_due' | 'job_application' | 'forum_reply';
+  type: 'document_submitted' | 'document_approved' | 'document_rejected' | 'new_request' | 'request_replied' | 'compliance_due' | 'job_application' | 'forum_reply';
   title: string;
   body: string;
   link?: string;

@@ -4,8 +4,9 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import {
   Sidebar,
-  getAdminNavItems,
-  getClinicNavItems,
+  getAdminWorkspaceNavItems,
+  getClinicWorkspaceNavItems,
+  getDoctorWorkspaceNavItems,
   getUserNavItems,
 } from '@/components/shared/Sidebar';
 
@@ -15,9 +16,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const navItems =
     userRole === 'admin'
-      ? getAdminNavItems(t)
+      ? getAdminWorkspaceNavItems(t)
       : userRole === 'clinic'
-      ? getClinicNavItems(t)
+      ? getClinicWorkspaceNavItems(t)
+      : userRole === 'doctor'
+      ? getDoctorWorkspaceNavItems(t)
       : getUserNavItems(t);
 
   const roleLabel =
@@ -31,7 +34,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   return (
     <div className="flex min-h-screen bg-slate-50">
-      <Sidebar navItems={navItems} roleLabel={roleLabel} />
+      <Sidebar key={userRole ?? 'loading'} navItems={navItems} roleLabel={roleLabel} />
       <main className="flex-1 overflow-auto p-3 sm:p-4 lg:p-6 pt-16 lg:pt-6 min-w-0">{children}</main>
     </div>
   );

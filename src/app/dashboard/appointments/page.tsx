@@ -1,20 +1,12 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import {
-  getAppointmentsByClinic,
-  getAppointmentsByPatient,
-  createAppointment,
-  updateAppointmentStatus,
-  deleteAppointment,
-} from '@/lib/firestore';
 import type { Appointment } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import {
   Calendar,
@@ -28,6 +20,11 @@ import {
   Search,
   ClipboardList,
 } from 'lucide-react';
+import { PageHeader } from '@/components/shared/PageHeader';
+import { StatCard } from '@/components/shared/StatCard';
+import { FilterBar } from '@/components/shared/FilterBar';
+import { EmptyState } from '@/components/shared/EmptyState';
+import { SkeletonList } from '@/components/shared/SkeletonList';
 
 const DATE_LOCALE: Record<string, string> = {
   uz: 'uz-UZ',
@@ -52,6 +49,22 @@ const EMPTY_FORM = {
   reason: '',
 };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function AppointmentsPage() {
   const { user, userRole, userProfile } = useAuth();
   const { t, lang } = useLanguage();
@@ -74,27 +87,21 @@ export default function AppointmentsPage() {
     cancelled: { label: t.appointments.cancelled, color: 'bg-red-100 text-red-700' },
   };
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      let data: Appointment[] = [];
-      if (userRole === 'clinic') {
-        data = await getAppointmentsByClinic(user.uid);
-      } else if (userRole === 'admin') {
-        data = await getAppointmentsByClinic(user.uid);
-      } else {
-        data = await getAppointmentsByPatient(user.uid);
-      }
-      setAppointments(data);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ appointments: Appointment[] }>('/api/appointments', token);
+      setAppointments(data.appointments);
     } catch {
       toast.error(t.appointments.loadError);
     } finally {
       setLoading(false);
     }
-  }
+  }, [t.appointments.loadError, user]);
 
-  useEffect(() => { load(); }, [user, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   async function handleCreate() {
     if (!user || !form.patientName || !form.date || !form.time || !form.reason) {
@@ -105,8 +112,10 @@ export default function AppointmentsPage() {
     try {
       const clinicId = userRole === 'clinic' ? user.uid : (userProfile as { linkedClinicId?: string })?.linkedClinicId ?? user.uid;
       const clinicName = (userProfile as { clinicName?: string })?.clinicName ?? 'Klinika';
-      const now = new Date().toISOString();
-      await createAppointment({
+      const token = await user.getIdToken();
+      await requestJson<Appointment>('/api/appointments', token, {
+        method: 'POST',
+        body: JSON.stringify({
         clinicId,
         clinicName,
         patientId: `manual_${Date.now()}`,
@@ -116,9 +125,7 @@ export default function AppointmentsPage() {
         date: form.date,
         time: form.time,
         reason: form.reason,
-        status: 'pending',
-        createdAt: now,
-        updatedAt: now,
+        }),
       });
       toast.success(t.appointments.added);
       setForm(EMPTY_FORM);
@@ -134,7 +141,12 @@ export default function AppointmentsPage() {
   async function handleStatus(id: string, status: Appointment['status']) {
     setActiveId(id);
     try {
-      await updateAppointmentStatus(id, status);
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<Appointment>('/api/appointments', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id, status }),
+      });
       toast.success(status === 'confirmed' ? t.appointments.confirmedToast : status === 'done' ? t.appointments.doneToast : t.appointments.cancelledToast);
       await load();
     } catch {
@@ -147,7 +159,12 @@ export default function AppointmentsPage() {
   async function handleDelete(id: string) {
     setActiveId(id);
     try {
-      await deleteAppointment(id);
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/appointments', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
       toast.success(t.appointments.deleted);
       await load();
     } catch {
@@ -174,43 +191,21 @@ export default function AppointmentsPage() {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Calendar className="w-6 h-6 text-blue-600" />
-            {t.appointments.title}
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">{t.appointments.subtitle}</p>
-        </div>
-        {isClinic && (
+      <PageHeader
+        icon={<Calendar className="w-6 h-6 text-blue-600" />}
+        title={t.appointments.title}
+        subtitle={t.appointments.subtitle}
+        actions={isClinic ? (
           <Button onClick={() => setShowForm(!showForm)} className="gap-2 shrink-0">
-            <Plus className="w-4 h-4" />
-            {t.appointments.newAppointment}
+            <Plus className="w-4 h-4" />{t.appointments.newAppointment}
           </Button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
-      {/* Stat cards */}
       <div className="grid grid-cols-3 gap-4">
-        <Card className="border-l-4 border-l-blue-500">
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-500">{t.appointments.today}</p>
-            <p className="text-2xl font-bold text-blue-700">{todayCount}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-yellow-500">
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-500">{t.appointments.pending}</p>
-            <p className="text-2xl font-bold text-yellow-700">{pendingCount}</p>
-          </CardContent>
-        </Card>
-        <Card className="border-l-4 border-l-green-500">
-          <CardContent className="p-4">
-            <p className="text-xs text-slate-500">{t.appointments.done}</p>
-            <p className="text-2xl font-bold text-green-700">{doneCount}</p>
-          </CardContent>
-        </Card>
+        <StatCard label={t.appointments.today} value={loading ? null : todayCount} icon={<Calendar className="h-6 w-6" />} colorClass="border-l-blue-500 bg-blue-50/30" iconClass="text-blue-600" />
+        <StatCard label={t.appointments.pending} value={loading ? null : pendingCount} icon={<ClipboardList className="h-6 w-6" />} colorClass="border-l-yellow-500 bg-yellow-50/30" iconClass="text-yellow-600" />
+        <StatCard label={t.appointments.done} value={loading ? null : doneCount} icon={<CheckCircle2 className="h-6 w-6" />} colorClass="border-l-green-500 bg-green-50/30" iconClass="text-green-600" />
       </div>
 
       {/* Create form */}
@@ -303,48 +298,30 @@ export default function AppointmentsPage() {
       <div className="flex flex-col sm:flex-row gap-3">
         <div className="relative max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <Input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder={t.appointments.searchPlaceholder}
-            className="pl-9"
-          />
+          <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder={t.appointments.searchPlaceholder} className="pl-9" />
         </div>
-        <div className="flex gap-2 flex-wrap">
-          {['all', 'pending', 'confirmed', 'done', 'cancelled'].map((s) => (
-            <button
-              key={s}
-              onClick={() => setFilterStatus(s)}
-              className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-all ${
-                filterStatus === s
-                  ? 'bg-slate-900 text-white border-slate-900'
-                  : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
-              }`}
-            >
-              {s === 'all' ? t.appointments.allFilter : STATUS_META[s as Appointment['status']]?.label}
-            </button>
-          ))}
-        </div>
+        <FilterBar
+          options={(['all', 'pending', 'confirmed', 'done', 'cancelled'] as const).map((s) => ({
+            key: s,
+            label: s === 'all' ? t.appointments.allFilter : STATUS_META[s]?.label ?? s,
+          }))}
+          value={filterStatus}
+          onChange={setFilterStatus}
+        />
       </div>
 
-      {/* Loading */}
-      {loading && (
-        <div className="space-y-3">
-          {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}
-        </div>
-      )}
+      {loading && <SkeletonList count={4} />}
 
-      {/* Empty */}
       {!loading && filtered.length === 0 && (
-        <div className="text-center py-20 bg-white rounded-xl border border-dashed border-slate-200">
-          <ClipboardList className="w-12 h-12 mx-auto mb-3 text-slate-300" />
-          <p className="text-slate-500 font-medium">{t.appointments.notFound}</p>
-          {isClinic && (
-            <Button variant="outline" size="sm" className="mt-4" onClick={() => setShowForm(true)}>
+        <EmptyState
+          icon={<ClipboardList className="w-12 h-12" />}
+          title={t.appointments.notFound}
+          action={isClinic ? (
+            <Button variant="outline" size="sm" onClick={() => setShowForm(true)}>
               <Plus className="w-4 h-4 mr-1" /> {t.appointments.addNew}
             </Button>
-          )}
-        </div>
+          ) : undefined}
+        />
       )}
 
       {/* Appointment cards */}

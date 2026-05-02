@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getEquipment, createEquipment, updateEquipment, deleteEquipment } from '@/lib/firestore';
+import { useRouter } from 'next/navigation';
 import type { Equipment } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,10 +20,27 @@ const STATUS_META: Record<Equipment['status'], { label: string; color: string }>
 
 const EMPTY = { name: '', model: '', serialNumber: '', purchaseDate: '', warrantyExpiry: '', lastService: '', nextService: '', status: 'operational' as Equipment['status'], location: '', notes: '' };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function EquipmentPage() {
-  const { user, userRole } = useAuth();
+  const { user, userRole, loading } = useAuth();
+  const router = useRouter();
   const [equipment, setEquipment] = useState<Equipment[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [showForm, setShowForm] = useState(false);
@@ -33,27 +50,43 @@ export default function EquipmentPage() {
 
   const canEdit = userRole === 'clinic' || userRole === 'admin';
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
-    try { setEquipment(await getEquipment(user.uid)); }
+    setDataLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ equipment: Equipment[] }>('/api/equipment', token);
+      setEquipment(data.equipment);
+    }
     catch { toast.error('Yuklashda xato'); }
-    finally { setLoading(false); }
-  }
+    finally { setDataLoading(false); }
+  }, [user]);
 
-  useEffect(() => { load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
 
   async function handleSave() {
     if (!user || !form.name || !form.location) { toast.error('Nom va joylashuv majburiy'); return; }
     setSaving(true);
     try {
-      const now = new Date().toISOString();
+      const token = await user.getIdToken();
       const clean = { ...form, serialNumber: form.serialNumber || undefined, purchaseDate: form.purchaseDate || undefined, warrantyExpiry: form.warrantyExpiry || undefined, lastService: form.lastService || undefined, nextService: form.nextService || undefined, notes: form.notes || undefined };
       if (editId) {
-        await updateEquipment(editId, clean);
+        await requestJson<Equipment>('/api/equipment', token, {
+          method: 'PATCH',
+          body: JSON.stringify({ id: editId, ...clean }),
+        });
         toast.success('Yangilandi');
       } else {
-        await createEquipment({ ...clean, clinicId: user.uid, createdAt: now });
+        await requestJson<Equipment>('/api/equipment', token, {
+          method: 'POST',
+          body: JSON.stringify(clean),
+        });
         toast.success('Jihozlar ro\'yxatiga qo\'shildi');
       }
       setShowForm(false); setEditId(null); setForm(EMPTY); await load();
@@ -67,6 +100,34 @@ export default function EquipmentPage() {
     setShowForm(true);
   }
 
+  async function updateEquipmentStatus(id: string, status: Equipment['status']) {
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<Equipment>('/api/equipment', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id, status }),
+      });
+      await load();
+    } catch {
+      toast.error('Yangilashda xato');
+    }
+  }
+
+  async function handleDelete(id: string) {
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/equipment', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
+      await load();
+    } catch {
+      toast.error('O\'chirishda xato');
+    }
+  }
+
   const filtered = equipment.filter((e) => {
     const ms = filterStatus === 'all' || e.status === filterStatus;
     const ms2 = !search || e.name.toLowerCase().includes(search.toLowerCase()) || e.location.toLowerCase().includes(search.toLowerCase()) || e.model.toLowerCase().includes(search.toLowerCase());
@@ -76,6 +137,8 @@ export default function EquipmentPage() {
   const brokenCount = equipment.filter((e) => e.status === 'broken').length;
   const maintenanceCount = equipment.filter((e) => e.status === 'maintenance').length;
   const warrantyExpiring = equipment.filter((e) => e.warrantyExpiry && (new Date(e.warrantyExpiry).getTime() - Date.now()) / 86400000 <= 30 && e.status !== 'decommissioned').length;
+
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
 
   return (
     <div className="space-y-5">
@@ -138,10 +201,10 @@ export default function EquipmentPage() {
         </div>
       </div>
 
-      {loading && <div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}</div>}
-      {!loading && filtered.length === 0 && <div className="text-center py-16 bg-white rounded-xl border border-dashed"><Wrench className="w-12 h-12 mx-auto mb-3 text-slate-200" /><p className="text-slate-500">Jihozlar topilmadi</p></div>}
+      {dataLoading &&<div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}</div>}
+      {!dataLoading &&filtered.length === 0 && <div className="text-center py-16 bg-white rounded-xl border border-dashed"><Wrench className="w-12 h-12 mx-auto mb-3 text-slate-200" /><p className="text-slate-500">Jihozlar topilmadi</p></div>}
 
-      {!loading && filtered.length > 0 && (
+      {!dataLoading &&filtered.length > 0 && (
         <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">
           {filtered.map((eq) => {
             const sm = STATUS_META[eq.status];
@@ -170,9 +233,9 @@ export default function EquipmentPage() {
                   </div>
                   {canEdit && (
                     <div className="flex gap-1 mt-3 pt-3 border-t border-slate-100">
-                      {eq.status === 'broken' && <Button size="sm" variant="outline" className="h-7 text-xs text-green-600 flex-1" onClick={() => updateEquipment(eq.id, { status: 'operational' }).then(load)}><CheckCircle2 className="w-3 h-3 mr-1" />Tuzatildi</Button>}
+                      {eq.status === 'broken' && <Button size="sm" variant="outline" className="h-7 text-xs text-green-600 flex-1" onClick={() => updateEquipmentStatus(eq.id, 'operational')}><CheckCircle2 className="w-3 h-3 mr-1" />Tuzatildi</Button>}
                       <Button size="sm" variant="ghost" className="h-7 w-7 p-0 ml-auto text-slate-400 hover:text-blue-600" onClick={() => startEdit(eq)}><Pencil className="w-3.5 h-3.5" /></Button>
-                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-red-600" onClick={() => deleteEquipment(eq.id).then(load)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                      <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-red-600" onClick={() => handleDelete(eq.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
                     </div>
                   )}
                 </CardContent>

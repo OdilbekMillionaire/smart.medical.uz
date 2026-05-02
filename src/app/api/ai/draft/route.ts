@@ -1,24 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateForTask, DOCUMENT_DRAFT_PROMPT, REPLY_DRAFT_PROMPT } from '@/lib/vertex-ai';
-import { getAdminAuth } from '@/lib/firebase-admin';
+import { isApiError, parseJson, requireApiUser } from '@/lib/api-auth';
+import { z } from 'zod';
+
+const DraftSchema = z.object({
+  mode: z.enum(['document', 'reply']),
+  documentType: z.string().trim().max(120).optional(),
+  context: z.string().max(50000).optional(),
+  requestBody: z.string().max(50000).optional(),
+});
 
 // ── Feature 1: AI Document/Reply Drafting ─────────────────────────────────────
 // Upgraded to use Gemini 2.5 Flash via generateForTask('draft')
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    await getAdminAuth().verifyIdToken(token);
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
 
-    const body = await req.json() as {
-      mode: 'document' | 'reply';
-      documentType?: string;
-      context?: string;
-      requestBody?: string;
-    };
+    const body = await parseJson(req, DraftSchema);
+    if (body instanceof NextResponse) return body;
 
     const { mode, documentType, context, requestBody } = body;
 

@@ -1,10 +1,9 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { type User } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { type User, onAuthStateChanged, signInAnonymously } from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { getFirebaseAuth, getFirebaseDb } from '@/lib/firebase';
-import { onAuthStateChanged } from 'firebase/auth';
 import type { UserRole, BaseUser } from '@/types';
 
 interface AuthContextValue {
@@ -23,6 +22,10 @@ const AuthContext = createContext<AuthContextValue>({
   loading: true,
 });
 
+const TRIAL_MODE_ENABLED =
+  process.env.NODE_ENV !== 'production' &&
+  process.env.NEXT_PUBLIC_DISABLE_TRIAL_MODE !== 'true';
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<BaseUser | null>(null);
@@ -35,31 +38,49 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const firebaseDb = getFirebaseDb();
 
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (firebaseUser) => {
-      // ── TRIAL MODE: bypass Firebase auth for demo purposes ──────────────────
-      if (!firebaseUser) {
-        const trialRole = typeof window !== 'undefined'
-          ? (localStorage.getItem('trial_role') as UserRole | null)
-          : null;
-        if (trialRole) {
-          const names: Record<UserRole, string> = {
-            admin: 'Demo Admin',
-            clinic: 'Demo Klinika',
-            doctor: 'Demo Shifokor',
-            patient: 'Demo Bemor',
-          };
-          setUser(null);
-          setUserRole(trialRole);
-          setUserProfile({
-            role: trialRole,
-            email: 'demo@trial.uz',
-            displayName: names[trialRole],
-            profileComplete: true,
-            createdAt: new Date().toISOString(),
-          } as BaseUser);
-          setProfileComplete(true);
-          setLoading(false);
-          return;
+      // ── TRIAL MODE: takes priority over any real Firebase user ──────────────
+      const trialRole = TRIAL_MODE_ENABLED && typeof window !== 'undefined'
+        ? (localStorage.getItem('trial_role') as UserRole | null)
+        : null;
+      if (!TRIAL_MODE_ENABLED && typeof window !== 'undefined') {
+        localStorage.removeItem('trial_role');
+      }
+      if (trialRole) {
+        // Ensure we have an anonymous Firebase user so Firestore rules pass
+        // and pages that check `if (!user) return` don't get stuck
+        let anonUser = firebaseUser?.isAnonymous ? firebaseUser : null;
+        if (!anonUser) {
+          try {
+            const cred = await signInAnonymously(firebaseAuth);
+            anonUser = cred.user;
+          } catch { /* use null — pages will show empty state */ }
         }
+        const names: Record<UserRole, string> = {
+          admin: 'Demo Admin',
+          clinic: 'Demo Klinika',
+          doctor: 'Demo Shifokor',
+          patient: 'Demo Foydalanuvchi',
+        };
+        const trialProfile: BaseUser = {
+          uid: anonUser?.uid ?? 'trial',
+          role: trialRole,
+          email: 'demo@trial.uz',
+          displayName: names[trialRole],
+          profileComplete: true,
+          createdAt: new Date().toISOString(),
+        };
+        // Write trial profile to Firestore so server-side requireApiUser finds the role
+        if (anonUser) {
+          try {
+            await setDoc(doc(firebaseDb, 'users', anonUser.uid), trialProfile, { merge: true });
+          } catch { /* Firestore rules may block anonymous writes — API calls will return empty state */ }
+        }
+        setUser(anonUser);
+        setUserRole(trialRole);
+        setUserProfile(trialProfile);
+        setProfileComplete(true);
+        setLoading(false);
+        return;
       }
       // ── END TRIAL MODE ───────────────────────────────────────────────────────
 

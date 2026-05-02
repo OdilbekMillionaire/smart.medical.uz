@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { subscribeToNotifications, markNotificationRead, markAllNotificationsRead } from '@/lib/firestore';
+import { subscribeToNotifications } from '@/lib/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,7 +12,24 @@ import Link from 'next/link';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { AppNotification } from '@/types';
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 const TYPE_ICONS: Record<AppNotification['type'], { icon: React.ReactNode; color: string }> = {
+  document_submitted: { icon: <FileText className="w-4 h-4" />, color: 'bg-amber-100 text-amber-700' },
   document_approved: { icon: <FileText className="w-4 h-4" />, color: 'bg-green-100 text-green-700' },
   document_rejected: { icon: <FileText className="w-4 h-4" />, color: 'bg-red-100 text-red-700' },
   new_request: { icon: <MessageSquare className="w-4 h-4" />, color: 'bg-blue-100 text-blue-700' },
@@ -51,7 +68,12 @@ export default function NotificationsPage() {
   }, [user]);
 
   const handleMarkRead = async (id: string) => {
-    await markNotificationRead(id);
+    if (!user) return;
+    const token = await user.getIdToken();
+    await requestJson<{ success: boolean }>('/api/notifications', token, {
+      method: 'PATCH',
+      body: JSON.stringify({ id }),
+    });
     // onSnapshot will auto-update state
   };
 
@@ -59,7 +81,11 @@ export default function NotificationsPage() {
     if (!user) return;
     setMarkingAll(true);
     try {
-      await markAllNotificationsRead(user.uid);
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/notifications', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ all: true }),
+      });
     } finally {
       setMarkingAll(false);
     }

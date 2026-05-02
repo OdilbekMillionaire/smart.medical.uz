@@ -1,12 +1,9 @@
 'use client';
 
-import { useState, useEffect, useMemo } from 'react';
+import { useCallback, useState, useEffect, useMemo } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import {
-  createSurvey, getSurveysByClinic, getSurveysByPatient, getAllSurveys,
-} from '@/lib/firestore';
-import type { Survey, ClinicUser, PatientUser } from '@/types';
+import type { Survey } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +16,22 @@ import {
 } from 'lucide-react';
 
 type LK = 'uz' | 'uz_cyrillic' | 'ru' | 'en' | 'kk';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 const L: Record<LK, {
   title: string; subtitle: string; writeReview: string; totalReviews: string;
@@ -409,35 +422,35 @@ export default function SurveysPage() {
   const isAdmin = userRole === 'admin';
   const isPatient = userRole === 'patient' || userRole === 'doctor';
 
-  async function load() {
-    if (!user) return;
+  const load = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      let data: Survey[] = [];
-      if (isAdmin) data = await getAllSurveys();
-      else if (isClinic) data = await getSurveysByClinic(user.uid);
-      else data = await getSurveysByPatient(user.uid);
-      setSurveys(data);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ surveys: Survey[] }>('/api/surveys', token);
+      setSurveys(data.surveys);
     } catch {
       toast.error(tx.loadError);
     } finally {
       setLoading(false);
     }
-  }
+  }, [tx.loadError, user]);
 
-  useEffect(() => { load(); }, [user, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   async function handleSubmit() {
     if (!user) return;
     if (form.overall === 0) { toast.error(tx.ratingRequired); return; }
     setSaving(true);
     try {
-      const patient = userProfile as PatientUser | null;
-      const clinic = userProfile as ClinicUser | null;
-      await createSurvey({
-        clinicId: isClinic ? user.uid : (clinic as { linkedClinicId?: string })?.linkedClinicId ?? 'unknown',
-        patientId: user.uid,
-        patientName: patient?.fullName ?? userProfile?.displayName ?? user.email ?? '',
+      const token = await user.getIdToken();
+      await requestJson<Survey>('/api/surveys', token, {
+        method: 'POST',
+        body: JSON.stringify({
+        clinicId: isClinic ? user.uid : (userProfile as { linkedClinicId?: string } | null)?.linkedClinicId,
         ratings: {
           overall: form.overall,
           staff: form.staff || form.overall,
@@ -446,7 +459,7 @@ export default function SurveysPage() {
         },
         comment: form.comment,
         wouldRecommend: form.wouldRecommend,
-        createdAt: new Date().toISOString(),
+      }),
       });
       toast.success(tx.thankYou);
       setForm(EMPTY_FORM);
@@ -494,7 +507,7 @@ export default function SurveysPage() {
   const EmojiIcon = getRatingEmoji(avgOverall);
 
   return (
-    <div className="space-y-5 max-w-4xl">
+    <div className="space-y-5 w-full">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

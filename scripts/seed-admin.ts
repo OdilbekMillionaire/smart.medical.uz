@@ -59,7 +59,10 @@ async function main() {
     { merge: true }
   );
 
+  await auth.setCustomUserClaims(uid, { role: 'admin' });
+
   console.log('Admin Firestore doc written successfully.');
+  console.log('Admin custom claim written successfully.');
   console.log(`\nCredentials:\n  Email: ${ADMIN_EMAIL}\n  Password: ${ADMIN_PASSWORD}`);
   process.exit(0);
 }

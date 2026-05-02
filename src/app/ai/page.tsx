@@ -13,8 +13,11 @@ import {
   Bot, User, Send, Plus, Search, RotateCcw, Square, Paperclip,
   ChevronDown, Shield, Users, ClipboardCheck, Award, FileText, Heart,
   Zap, MessageSquare, Settings, Stethoscope, FlaskConical,
-  ArrowLeft, Phone, Loader2,
+  ArrowLeft, Phone, Loader2, Globe,
 } from 'lucide-react';
+import { SourcesList, type AiSource } from '@/components/shared/SourcesList';
+import { AiMarkdown } from '@/components/shared/AiMarkdown';
+import { AiMessageActions } from '@/components/shared/AiMessageActions';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Role = 'user' | 'assistant';
@@ -47,7 +50,7 @@ const L = {
     detailed: 'Batafsil', detailedDesc: 'Chuqur tahlil',
     risk: 'Xavf Baholash', riskDesc: 'Xavf darajasi va choralar',
     heroTitle: 'AI Tibbiy Maslahatchi',
-    heroSub: "O'zbekiston xususiy klinikaları uchun AI-powered platforma. SanQvaN, litsenziyalash va tibbiy savollarga darhol javob oling.",
+    heroSub: "O'zbekiston xususiy klinikaları uchun AI-powered platforma. Litsenziyalash, sanitariya muvofiqlik va tibbiy savollarga darhol javob oling.",
     placeholder: "Savol yozing... (Enter — yuborish, Shift+Enter — yangi qator)",
     send: 'Yuborish', stop: "To'xtatish",
     addCtx: "Klinika kontekstini qo'shing",
@@ -55,22 +58,22 @@ const L = {
     aiLabel: 'AI Maslahatchi',
     suggested: [
       { q: 'Klinika litsenziyasini yangilash uchun qanday hujjatlar kerak?', icon: 'shield' },
-      { q: "SanQvaN me'yorlariga ko'ra dezinfeksiya tartibotlari qanday?", icon: 'flask' },
+      { q: "Sanitariya me'yorlariga ko'ra dezinfeksiya tartibotlari qanday?", icon: 'flask' },
       { q: "Shifokor malaka toifasini ko'tarish bosqichlari qanday?", icon: 'award' },
       { q: 'Tekshiruv vaqtida inspektor qanday savollar beradi?', icon: 'search' },
       { q: 'Bemor shikoyatiga qanday javob berish kerak?', icon: 'msg' },
     ],
     tpls: [
-      { icon: Shield, label: 'Litsenziya Tahlili', p: "Klinikamning tibbiy faoliyat litsenziyasi talablarini va uni yangilash uchun zarur qadamlarni batafsil ko'rsating." },
-      { icon: Users, label: 'Xodimlar Hujjatlari', p: "Klinikadagi tibbiy xodimlarning barcha hujjatlariga qo'yiladigan qonuniy talablarni tushuntiring." },
-      { icon: ClipboardCheck, label: 'SanQvaN Muvofiqlik', p: "SanQvaN sanitariya me'yorlari bo'yicha klinikaning muvofiqligini ta'minlash uchun asosiy talablarni ko'rsating." },
-      { icon: Search, label: 'Tekshiruvga Tayyorlik', p: "Davlat tibbiyot tekshiruviga tayyorlanish bo'yicha to'liq chek-list va maslahatlar bering." },
-      { icon: Award, label: 'Malaka Tahlili', p: "Tibbiy xodimlarning malaka toifalari, ularni oshirish tartibi va muddatlari haqida batafsil ma'lumot bering." },
-      { icon: FileText, label: 'Xizmat Shartnomasi', p: "Tibbiy xizmatlar ko'rsatish shartnomasi uchun asosiy bandlar va qonuniy talablarni tayyorlab bering." },
-      { icon: Heart, label: 'Bemor Rozilik Shakli', p: "Bemor roziligi shakli uchun O'zbekiston qonunchiligidagi barcha majburiy talablarni ko'rsating." },
-      { icon: Zap, label: 'Sterilizatsiya Protokoli', p: "Tibbiy asbob-uskunalar sterilizatsiyasi uchun SanQvaN bo'yicha protokol va majburiy hujjatlarni tushuntiring." },
-      { icon: MessageSquare, label: 'Shikoyatga Javob', p: "Bemor yoki uning vakili tomonidan kelgan shikoyatga rasmiy va professional javob yozishda yordam bering." },
-      { icon: Settings, label: 'Jihozlar Sertifikati', p: "Tibbiy jihozlar sertifikatsiyasi, texnik pasport va xizmat ko'rsatish shartnomasi talablarini tushuntiring." },
+      { icon: Shield, label: 'Litsenziya tahlili', p: "Klinikamning tibbiy faoliyat litsenziyasi talablarini va uni yangilash uchun zarur qadamlarni batafsil ko'rsating." },
+      { icon: Users, label: 'Xodimlar hujjatlari', p: "Klinikadagi tibbiy xodimlarning barcha hujjatlariga qo'yiladigan qonuniy talablarni tushuntiring." },
+      { icon: ClipboardCheck, label: 'Sanitariya muvofiqlik', p: "Sanitariya me'yorlari bo'yicha klinikaning muvofiqligini ta'minlash uchun asosiy talablarni ko'rsating." },
+      { icon: Search, label: 'Tekshiruvga tayyorlik', p: "Davlat tibbiyot tekshiruviga tayyorlanish bo'yicha to'liq chek-list va maslahatlar bering." },
+      { icon: Award, label: 'Malaka tahlili', p: "Tibbiy xodimlarning malaka toifalari, ularni oshirish tartibi va muddatlari haqida batafsil ma'lumot bering." },
+      { icon: FileText, label: 'Xizmat shartnomasi', p: "Tibbiy xizmatlar ko'rsatish shartnomasi uchun asosiy bandlar va qonuniy talablarni tayyorlab bering." },
+      { icon: Heart, label: 'Bemor rozilik shakli', p: "Bemor roziligi shakli uchun O'zbekiston qonunchiligidagi barcha majburiy talablarni ko'rsating." },
+      { icon: Zap, label: 'Sterilizatsiya protokoli', p: "Tibbiy asbob-uskunalar sterilizatsiyasi uchun SanQvaN bo'yicha protokol va majburiy hujjatlarni tushuntiring." },
+      { icon: MessageSquare, label: 'Shikoyatga javob', p: "Bemor yoki uning vakili tomonidan kelgan shikoyatga rasmiy va professional javob yozishda yordam bering." },
+      { icon: Settings, label: 'Jihozlar sertifikati', p: "Tibbiy jihozlar sertifikatsiyasi, texnik pasport va xizmat ko'rsatish shartnomasi talablarini tushuntiring." },
     ],
     drafts: ['Mehnat Shartnomasi', 'Litsenziya Yangilash', "Malaka Oshirish Buyrug'i", 'Sterilizatsiya Shart.', "Yo'llanma Xat"],
     modelRec: 'Tavsiya etiladi',
@@ -99,7 +102,7 @@ const L = {
     detailed: 'Детальный', detailedDesc: 'Глубокий анализ',
     risk: 'Анализ Рисков', riskDesc: 'Уровень риска и меры',
     heroTitle: 'ИИ Медицинский Советник',
-    heroSub: 'AI-платформа для частных клиник Узбекистана. Мгновенные ответы на медицинские вопросы и вопросы соответствия.',
+    heroSub: 'AI-платформа для частных клиник Узбекистана. Мгновенные ответы на медицинские вопросы, лицензирование и санитарное соответствие.',
     placeholder: 'Напишите вопрос... (Enter — отправить, Shift+Enter — новая строка)',
     send: 'Отправить', stop: 'Остановить',
     addCtx: 'Добавить контекст клиники',
@@ -107,7 +110,7 @@ const L = {
     aiLabel: 'ИИ Советник',
     suggested: [
       { q: 'Какие документы нужны для продления лицензии клиники?', icon: 'shield' },
-      { q: 'Каковы требования СанПиН к дезинфекции?', icon: 'flask' },
+      { q: 'Каковы санитарные требования к дезинфекции в клинике?', icon: 'flask' },
       { q: 'Как повысить квалификационную категорию врача?', icon: 'award' },
       { q: 'Какие вопросы задаёт инспектор при проверке?', icon: 'search' },
       { q: 'Как правильно ответить на жалобу пациента?', icon: 'msg' },
@@ -115,7 +118,7 @@ const L = {
     tpls: [
       { icon: Shield, label: 'Анализ Лицензии', p: 'Проанализируйте требования к медицинской лицензии моей клиники и укажите необходимые шаги для её продления.' },
       { icon: Users, label: 'Документы Персонала', p: 'Объясните все юридические требования к документам медицинского персонала клиники.' },
-      { icon: ClipboardCheck, label: 'Соответствие СанПиН', p: 'Укажите основные требования СанПиН для обеспечения соответствия деятельности клиники.' },
+      { icon: ClipboardCheck, label: 'Санитарные нормы', p: 'Укажите основные санитарные требования для обеспечения соответствия деятельности клиники.' },
       { icon: Search, label: 'Подготовка к Проверке', p: 'Составьте полный чеклист и рекомендации по подготовке к государственной медицинской проверке.' },
       { icon: Award, label: 'Анализ Квалификации', p: 'Предоставьте подробную информацию о квалификационных категориях и порядке их повышения.' },
       { icon: FileText, label: 'Договор Услуг', p: 'Подготовьте основные пункты и правовые требования договора на оказание медицинских услуг.' },
@@ -152,7 +155,7 @@ const L = {
     detailed: 'Detailed', detailedDesc: 'In-depth analysis',
     risk: 'Risk Assessment', riskDesc: 'Risk level and measures',
     heroTitle: 'AI Medical Advisor',
-    heroSub: 'AI-powered platform for private clinics in Uzbekistan. Get instant answers on SanQvaN, licensing, and medical compliance.',
+    heroSub: 'AI-powered platform for private clinics in Uzbekistan. Get instant answers on licensing, sanitary compliance, and medical questions.',
     placeholder: 'Ask a question... (Enter to send, Shift+Enter for new line)',
     send: 'Send', stop: 'Stop',
     addCtx: 'Add clinic context',
@@ -160,7 +163,7 @@ const L = {
     aiLabel: 'AI Advisor',
     suggested: [
       { q: 'What documents are needed to renew a clinic license?', icon: 'shield' },
-      { q: 'What are the SanQvaN disinfection requirements?', icon: 'flask' },
+      { q: 'What are the sanitary requirements for clinic disinfection?', icon: 'flask' },
       { q: "How do I upgrade a doctor's qualification category?", icon: 'award' },
       { q: 'What questions does an inspector ask during an audit?', icon: 'search' },
       { q: 'How should I respond to a patient complaint?', icon: 'msg' },
@@ -168,7 +171,7 @@ const L = {
     tpls: [
       { icon: Shield, label: 'License Analysis', p: "Analyze my clinic's medical license requirements and detail the steps needed for renewal." },
       { icon: Users, label: 'Staff Documentation', p: 'Explain all legal requirements for medical staff documentation in the clinic.' },
-      { icon: ClipboardCheck, label: 'SanQvaN Compliance', p: 'List the key SanQvaN sanitary norms required to ensure clinic compliance.' },
+      { icon: ClipboardCheck, label: 'Sanitary compliance', p: 'List the key sanitary norms required to ensure clinic compliance and pass inspections.' },
       { icon: Search, label: 'Inspection Preparation', p: 'Provide a complete checklist and guidance for preparing for a government medical inspection.' },
       { icon: Award, label: 'Credential Analysis', p: 'Provide detailed information on medical staff qualification categories and how to upgrade them.' },
       { icon: FileText, label: 'Service Contract', p: 'Prepare the key clauses and legal requirements for a medical services contract.' },
@@ -206,7 +209,7 @@ const L = {
     detailed: 'Батафсил', detailedDesc: 'Чуқур таҳлил',
     risk: 'Хавф Баҳолаш', riskDesc: 'Хавф даражаси ва чоралар',
     heroTitle: 'АИ Тиббий Маслаҳатчи',
-    heroSub: 'Ўзбекистон хусусий клиникалари учун АИ-платформа. СанҚвН, лицензиялаш ва тиббий саволларга дарҳол жавоб олинг.',
+    heroSub: 'Ўзбекистон хусусий клиникалари учун АИ-платформа. Лицензиялаш, санитария мувофиқлик ва тиббий саволларга дарҳол жавоб олинг.',
     placeholder: 'Савол ёзинг... (Enter — юбориш, Shift+Enter — янги қатор)',
     send: 'Юбориш', stop: 'Тўхтатиш',
     addCtx: 'Клиника контекстини қўшинг',
@@ -214,7 +217,7 @@ const L = {
     aiLabel: 'АИ Маслаҳатчи',
     suggested: [
       { q: 'Клиника лицензиясини янгилаш учун қандай ҳужжатлар керак?', icon: 'shield' },
-      { q: 'СанҚвН меъёрларига кўра дезинфекция тартиботлари қандай?', icon: 'flask' },
+      { q: 'Санитария меъёрларига кўра дезинфекция тартиботлари қандай?', icon: 'flask' },
       { q: 'Шифокор малака тоифасини кўтариш босқичлари қандай?', icon: 'award' },
       { q: 'Текширув вақтида инспектор қандай саволлар беради?', icon: 'search' },
       { q: 'Бемор шикоятига қандай жавоб бериш керак?', icon: 'msg' },
@@ -222,7 +225,7 @@ const L = {
     tpls: [
       { icon: Shield, label: 'Лицензия Таҳлили', p: 'Клиникамнинг тиббий фаолият лицензияси талабларини ва уни янгилаш учун зарур қадамларни батафсил кўрсатинг.' },
       { icon: Users, label: 'Ходимлар Ҳужжатлари', p: 'Клинисадаги тиббий ходимларнинг барча ҳужжатларига қўйиладиган қонуний талабларни тушунтиринг.' },
-      { icon: ClipboardCheck, label: 'СанҚвН Мувофиқлик', p: 'СанҚвН санитария меъёрлари бўйича клинисанинг мувофиқлигини таъминлаш учун асосий талабларни кўрсатинг.' },
+      { icon: ClipboardCheck, label: 'Санитария мувофиқлик', p: 'Санитария меъёрлари бўйича клинисанинг мувофиқлигини таъминлаш учун асосий талабларни кўрсатинг.' },
       { icon: Search, label: 'Текширувга Тайёрлик', p: 'Давлат тиббиёт текширувига тайёрланиш бўйича тўлиқ чек-лист ва маслаҳатлар беринг.' },
       { icon: Award, label: 'Малака Таҳлили', p: 'Тиббий ходимларнинг малака тоифалари, уларни ошириш тартиби ва муддатлари ҳақида батафсил маълумот беринг.' },
       { icon: FileText, label: 'Хизмат Шартномаси', p: 'Тиббий хизматлар кўрсатиш шартномаси учун асосий бандлар ва қонуний талабларни тайёрлаб беринг.' },
@@ -259,7 +262,7 @@ const L = {
     detailed: 'Толық', detailedDesc: 'Тереңдетілген талдау',
     risk: 'Тәуекел Бағалау', riskDesc: 'Тәуекел деңгейі мен шаралар',
     heroTitle: 'ЖИ Медициналық Кеңесші',
-    heroSub: 'Өзбекстанның жеке клиникалары үшін ЖИ-платформа. СанҚвН, лицензиялау және медициналық сұрақтарға жылдам жауап алыңыз.',
+    heroSub: 'Өзбекстанның жеке клиникалары үшін ЖИ-платформа. Лицензиялау, санитарлық сәйкестілік және медициналық сұрақтарға жылдам жауап алыңыз.',
     placeholder: 'Сұрақ жазыңыз... (Enter — жіберу, Shift+Enter — жаңа жол)',
     send: 'Жіберу', stop: 'Тоқтату',
     addCtx: 'Клиника контекстін қосыңыз',
@@ -267,7 +270,7 @@ const L = {
     aiLabel: 'ЖИ Кеңесші',
     suggested: [
       { q: 'Клиника лицензиясын жаңарту үшін қандай құжаттар қажет?', icon: 'shield' },
-      { q: 'СанҚвН нормалары бойынша дезинфекция тәртібі қандай?', icon: 'flask' },
+      { q: 'Клиника дезинфекциясына қойылатын санитарлық талаптар қандай?', icon: 'flask' },
       { q: 'Дәрігердің біліктілік санатын қалай жоғарылатуға болады?', icon: 'award' },
       { q: 'Тексеру кезінде инспектор қандай сұрақтар қояды?', icon: 'search' },
       { q: 'Пациент шағымына қалай жауап беру керек?', icon: 'msg' },
@@ -275,7 +278,7 @@ const L = {
     tpls: [
       { icon: Shield, label: 'Лицензия Талдауы', p: 'Клиникамның медициналық қызмет лицензиясының талаптарын және оны жаңарту үшін қажетті қадамдарды толық көрсетіңіз.' },
       { icon: Users, label: 'Қызметкерлер Құжаттары', p: 'Клиникадағы медицина қызметкерлерінің барлық құжаттарына қойылатын заңдық талаптарды түсіндіріңіз.' },
-      { icon: ClipboardCheck, label: 'СанҚвН Сәйкестілік', p: 'Клиника қызметінің сәйкестілігін қамтамасыз ету үшін СанҚвН санитарлық нормаларының негізгі талаптарын көрсетіңіз.' },
+      { icon: ClipboardCheck, label: 'Санитарлық сәйкестілік', p: 'Клиника қызметінің сәйкестілігін қамтамасыз ету үшін санитарлық нормалардың негізгі талаптарын көрсетіңіз.' },
       { icon: Search, label: 'Тексеруге Дайындық', p: 'Мемлекеттік медициналық тексеруге дайындалу бойынша толық тізім мен кеңестер беріңіз.' },
       { icon: Award, label: 'Біліктілік Талдауы', p: 'Медицина қызметкерлерінің біліктілік санаттары, оларды арттыру тәртібі мен мерзімдері туралы толық мәлімет беріңіз.' },
       { icon: FileText, label: 'Қызмет Шарты', p: 'Медициналық қызметтер көрсету шарты үшін негізгі тармақтар мен заңдық талаптарды дайындаңыз.' },
@@ -445,6 +448,8 @@ export default function AIStandalonePage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [useWebSearch, setUseWebSearch] = useState(false);
+  const [convSources, setConvSources] = useState<Record<string, AiSource[]>>({});
 
   const abortRef = useRef<AbortController | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -518,6 +523,7 @@ export default function AIStandalonePage() {
           model: apiModel,
           format: FORMAT_API[format],
           context: context.trim() || undefined,
+          useWebSearch,
         }),
         signal: abortRef.current.signal,
       });
@@ -531,6 +537,7 @@ export default function AIStandalonePage() {
       if (!reader) throw new Error('No stream');
       const decoder = new TextDecoder();
       let full = '';
+      let finalSources: AiSource[] = [];
 
       while (true) {
         const { done, value } = await reader.read();
@@ -540,9 +547,9 @@ export default function AIStandalonePage() {
           const p = line.slice(6);
           if (p === '[DONE]') continue;
           try {
-            const j = JSON.parse(p) as { delta?: string; model?: string };
-            if (j.model) continue; // informational frame
-            if (!j.delta) continue;
+            const j = JSON.parse(p) as { delta?: string; model?: string; sources?: AiSource[] };
+            if (j.sources) { finalSources = j.sources; continue; }
+            if (j.model || !j.delta) continue;
             full += j.delta;
             setConversations((prev) => prev.map((c) => {
               if (c.id !== cid) return c;
@@ -553,6 +560,9 @@ export default function AIStandalonePage() {
           } catch { /* skip */ }
         }
       }
+      if (finalSources.length && cid) {
+        setConvSources((prev) => ({ ...prev, [cid]: finalSources }));
+      }
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       setError(err instanceof Error ? err.message : 'Xato yuz berdi.');
@@ -562,7 +572,7 @@ export default function AIStandalonePage() {
     } finally {
       setLoading(false); abortRef.current = null;
     }
-  }, [activeId, loading, messages, mode, format, context, selectedModel]);
+  }, [activeId, loading, messages, mode, format, context, selectedModel, useWebSearch]);
 
   function handleSubmit(e: FormEvent) { e.preventDefault(); sendMessage(input); }
   function handleKey(e: KeyboardEvent<HTMLTextAreaElement>) {
@@ -832,6 +842,18 @@ export default function AIStandalonePage() {
               )}
             </div>
 
+            <button
+              onClick={() => setUseWebSearch((v) => !v)}
+              className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold border transition-all ${
+                useWebSearch
+                  ? 'bg-cyan-600 text-white border-cyan-600 shadow-sm'
+                  : 'bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-400 border-slate-200 dark:border-slate-700 hover:border-cyan-400'
+              }`}
+            >
+              <Globe className="h-3.5 w-3.5" />
+              Web
+            </button>
+
             {messages.length > 0 && (
               <button onClick={newChat} className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors">
                 <RotateCcw className="h-3.5 w-3.5" />
@@ -843,35 +865,58 @@ export default function AIStandalonePage() {
         {/* ── Chat Area ─────────────────────────────────────────────────────── */}
         <div className="flex-1 overflow-y-auto">
           {displayMessages.length === 0 && !loading ? (
-            /* Empty state */
-            <div className="flex flex-col items-center justify-center min-h-full px-6 py-10 text-center">
-              <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-cyan-500 to-emerald-500 flex items-center justify-center shadow-xl shadow-cyan-500/20 mb-5">
-                <Stethoscope className="h-8 w-8 text-white" />
-              </div>
-              <div className="flex items-center gap-2 mb-3">
-                <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                  {tx.instantInsights} &nbsp;·&nbsp;
-                </span>
-                <span className={`h-2 w-2 rounded-full ${selectedModel.dot}`} />
-                <span className="text-[10px] font-bold text-slate-400">{selectedModel.label}</span>
-              </div>
-              <h2 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">{tx.heroTitle}</h2>
-              <p className="text-sm text-slate-500 dark:text-slate-400 max-w-md leading-relaxed mb-8">{tx.heroSub}</p>
+            /* Empty state — redesigned */
+            <div className="flex flex-col items-center justify-center min-h-full px-6 py-12 text-center">
 
-              {/* Mode cards */}
-              <div className="flex flex-wrap gap-3 justify-center mb-8">
-                {[
-                  { emoji: '⚡', label: tx.fast, desc: tx.fastDesc, cls: 'border-orange-200 bg-orange-50 dark:border-orange-900 dark:bg-orange-950/20', id: 'fast' as Mode },
-                  { emoji: '⚖️', label: tx.balanced, desc: tx.balancedDesc, cls: 'border-cyan-200 bg-cyan-50 dark:border-cyan-900 dark:bg-cyan-950/20', id: 'balanced' as Mode },
-                  { emoji: '🧠', label: tx.deep, desc: tx.deepDesc, cls: 'border-violet-200 bg-violet-50 dark:border-violet-900 dark:bg-violet-950/20', id: 'deep' as Mode },
-                ].map((card) => (
+              {/* Icon */}
+              <div className="relative mb-6">
+                <div className="h-20 w-20 rounded-3xl bg-gradient-to-br from-cyan-500 via-teal-500 to-emerald-500 flex items-center justify-center shadow-2xl shadow-cyan-500/30">
+                  <Stethoscope className="h-10 w-10 text-white" />
+                </div>
+                <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 border-2 border-white">
+                  <span className="h-1.5 w-1.5 rounded-full bg-white" />
+                </span>
+              </div>
+
+              {/* Badge */}
+              <div className="flex items-center gap-2 mb-4">
+                <div className="flex items-center gap-1.5 rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-[10px] font-bold tracking-widest uppercase text-slate-500 dark:text-slate-400">
+                  {tx.instantInsights}
+                  <span className="mx-1 opacity-30">·</span>
+                  <span className={`h-1.5 w-1.5 rounded-full ${selectedModel.dot}`} />
+                  <span className="ml-0.5">{selectedModel.label}</span>
+                </div>
+              </div>
+
+              {/* Title + subtitle */}
+              <h2 className="text-3xl font-extrabold tracking-tight text-slate-900 dark:text-white mb-3 leading-tight">
+                {tx.heroTitle}
+              </h2>
+              <p className="text-[15px] text-slate-500 dark:text-slate-400 max-w-lg leading-relaxed mb-10">
+                {tx.heroSub}
+              </p>
+
+              {/* Mode pills — compact horizontal */}
+              <div className="flex items-center gap-2 rounded-2xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-1.5 mb-10">
+                {([
+                  { id: 'fast' as Mode,     emoji: '⚡', label: tx.fast,     desc: tx.fastDesc,     active: 'bg-orange-500 text-white shadow-md shadow-orange-500/25' },
+                  { id: 'balanced' as Mode, emoji: '⚖️', label: tx.balanced, desc: tx.balancedDesc, active: 'bg-cyan-600 text-white shadow-md shadow-cyan-600/25' },
+                  { id: 'deep' as Mode,     emoji: '🧠', label: tx.deep,     desc: tx.deepDesc,     active: 'bg-violet-600 text-white shadow-md shadow-violet-600/25' },
+                ]).map((card) => (
                   <button
                     key={card.id}
                     onClick={() => setMode(card.id)}
-                    className={`rounded-xl border px-4 py-3 text-center transition-all hover:shadow-sm ${card.cls} ${mode === card.id ? 'ring-2 ring-offset-1 ring-cyan-400' : ''}`}
+                    className={`flex items-center gap-2 rounded-xl px-4 py-2.5 transition-all text-left ${
+                      mode === card.id
+                        ? card.active
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-white hover:bg-white dark:hover:bg-slate-700'
+                    }`}
                   >
-                    <div className="text-xl mb-1">{card.emoji}</div>
-                    <div className="text-xs font-bold text-slate-700 dark:text-slate-200 whitespace-nowrap">{card.label}:&nbsp;{card.desc}</div>
+                    <span className="text-base leading-none">{card.emoji}</span>
+                    <div>
+                      <p className="text-xs font-bold leading-none whitespace-nowrap">{card.label}</p>
+                      <p className={`text-[10px] mt-0.5 whitespace-nowrap ${mode === card.id ? 'opacity-80' : 'text-slate-400 dark:text-slate-500'}`}>{card.desc}</p>
+                    </div>
                   </button>
                 ))}
               </div>
@@ -882,19 +927,19 @@ export default function AIStandalonePage() {
                   <button
                     key={i}
                     onClick={() => sendMessage(s.q)}
-                    className="flex items-center gap-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3 text-left hover:border-slate-300 dark:hover:border-slate-600 hover:shadow-sm transition-all group"
+                    className="group flex items-center gap-3 rounded-2xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 px-4 py-3.5 text-left hover:border-cyan-300 dark:hover:border-cyan-700 hover:shadow-md hover:shadow-cyan-500/8 transition-all"
                   >
-                    <span className={`h-8 w-8 rounded-lg flex items-center justify-center shrink-0 ${SUGGEST_COLORS[i % 5]}`}>
+                    <span className={`h-9 w-9 rounded-xl flex items-center justify-center shrink-0 transition-transform group-hover:scale-110 ${SUGGEST_COLORS[i % 5]}`}>
                       <SuggestIcon type={s.icon} />
                     </span>
-                    <span className="text-sm text-slate-600 dark:text-slate-300 leading-snug text-left">{s.q}</span>
+                    <span className="text-[13px] text-slate-600 dark:text-slate-300 leading-snug text-left">{s.q}</span>
                   </button>
                 ))}
               </div>
             </div>
           ) : (
             /* Messages */
-            <div className="max-w-3xl mx-auto px-4 py-6 space-y-6">
+            <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
               {displayMessages.map((msg, i) => (
                 <div key={`${msg.role}-${i}`} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   {msg.role === 'assistant' && (
@@ -902,9 +947,9 @@ export default function AIStandalonePage() {
                       <Bot className="h-4 w-4 text-white" />
                     </div>
                   )}
-                  <div className={`max-w-[80%] rounded-2xl px-4 py-3 shadow-sm ${
+                  <div className={`flex-1 min-w-0 max-w-[85%] rounded-2xl px-4 py-3 shadow-sm ${
                     msg.role === 'user'
-                      ? 'bg-slate-900 dark:bg-slate-700 text-white rounded-tr-sm'
+                      ? 'bg-cyan-600 dark:bg-cyan-700 text-white rounded-tr-sm'
                       : 'bg-slate-50 dark:bg-slate-800 border border-slate-100 dark:border-slate-700 text-slate-900 dark:text-slate-100 rounded-tl-sm'
                   }`}>
                     {msg.role === 'assistant' && (
@@ -916,7 +961,7 @@ export default function AIStandalonePage() {
                       </p>
                     )}
                     {msg.content
-                      ? <MdText text={msg.content} />
+                      ? <AiMarkdown text={msg.content} streaming={loading && i === displayMessages.length - 1} />
                       : (
                         <div className="flex items-center gap-1 py-1">
                           <span className="h-2 w-2 rounded-full bg-cyan-500 animate-bounce [animation-delay:0ms]" />
@@ -925,6 +970,21 @@ export default function AIStandalonePage() {
                         </div>
                       )
                     }
+                    {msg.role === 'assistant' && activeConv && convSources[activeConv.id]?.length > 0 && i === displayMessages.length - 1 && (
+                      <div className="mt-3">
+                        <SourcesList sources={convSources[activeConv.id]} />
+                      </div>
+                    )}
+                    {msg.role === 'assistant' && msg.content && !loading && (
+                      <AiMessageActions
+                        text={msg.content}
+                        lang={lk}
+                        onRetry={i === displayMessages.length - 1 ? () => {
+                          const lastUser = [...displayMessages].reverse().find((m) => m.role === 'user');
+                          if (lastUser) sendMessage(lastUser.content);
+                        } : undefined}
+                      />
+                    )}
                   </div>
                   {msg.role === 'user' && (
                     <div className="h-8 w-8 shrink-0 rounded-xl bg-slate-200 dark:bg-slate-700 flex items-center justify-center mt-1">

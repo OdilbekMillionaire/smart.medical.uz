@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
@@ -14,10 +14,26 @@ import {
   Briefcase, Building2, MapPin, Search, Check, Send, X, HandCoins, Plus, Clock,
   TrendingUp, Bookmark, BookmarkCheck, Share2, Filter,
 } from 'lucide-react';
-import { getJobListings, createJobListing, applyToJob } from '@/lib/firestore';
 import type { JobListing } from '@/types';
 
 type LK = 'uz' | 'uz_cyrillic' | 'ru' | 'en' | 'kk';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 const L: Record<LK, {
   title: string; subtitle: string; postBtn: string; searchPlaceholder: string;
   newJobTitle: string; applyTitle: string; applyDesc: string;
@@ -155,14 +171,22 @@ export default function JobsPage() {
   const [applyMessage, setApplyMessage] = useState('');
   const [applying, setApplying] = useState(false);
 
-  const fetchJobs = async () => {
+  const fetchJobs = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
-    try { const data = await getJobListings(); setJobs(data); }
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ jobs: JobListing[] }>('/api/jobs', token);
+      setJobs(data.jobs);
+    }
     catch { toast.error("Vakansiyalarni yuklashda xatolik"); }
     finally { setLoading(false); }
-  };
+  }, [user]);
 
-  useEffect(() => { fetchJobs(); }, []);
+  useEffect(() => { fetchJobs(); }, [fetchJobs]);
 
   const filteredJobs = jobs.filter((job) => {
     const matchesSearch = !search || job.title.toLowerCase().includes(search.toLowerCase()) || job.clinicName.toLowerCase().includes(search.toLowerCase()) || job.location.toLowerCase().includes(search.toLowerCase());
@@ -178,15 +202,18 @@ export default function JobsPage() {
     if (!user || !userProfile) { toast.error("Tizimga kiring"); return; }
     setPosting(true);
     try {
-      await createJobListing({
+      const token = await user.getIdToken();
+      await requestJson<JobListing>('/api/jobs', token, {
+        method: 'POST',
+        body: JSON.stringify({
         title: postForm.title.trim(),
-        clinicId: user.uid,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         clinicName: (userProfile as any).clinicName || userProfile.displayName || user.email?.split('@')[0] || 'Klinika',
         location: postForm.location.trim(), region: postForm.region,
         salary: postForm.salary.trim() || 'Kelishilgan holda',
         description: postForm.description.trim(), requirements: postForm.requirements.trim(),
-        badges: postForm.badges, status: 'active', createdAt: new Date().toISOString(),
+        badges: postForm.badges,
+      }),
       });
       toast.success("Vakansiya platformaga qo'shildi!");
       setShowPostModal(false);
@@ -200,13 +227,15 @@ export default function JobsPage() {
     if (!applyJob || !user || !userProfile) { toast.error("Tizimga kiring"); return; }
     setApplying(true);
     try {
-      await applyToJob({
+      const token = await user.getIdToken();
+      await requestJson('/api/jobs/applications', token, {
+        method: 'POST',
+        body: JSON.stringify({
         jobId: applyJob.id,
-        applicantId: user.uid,
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         applicantName: userProfile.displayName || (userProfile as any).fullName || user.displayName || 'Nomaqlum',
-        applicantRole: userRole ?? 'patient', message: applyMessage.trim(),
-        status: 'pending', createdAt: new Date().toISOString(),
+        message: applyMessage.trim(),
+      }),
       });
       toast.success(tx.applied);
       setApplyJob(null); setApplyMessage('');
@@ -217,7 +246,7 @@ export default function JobsPage() {
   const stats = { total: jobs.length, urgent: jobs.filter((j) => j.badges?.includes('Shoshilinch')).length, newThisWeek: jobs.filter((j) => { const d = new Date(j.createdAt); return (Date.now() - d.getTime()) < 7 * 86400000; }).length };
 
   return (
-    <div className="space-y-6 max-w-5xl">
+    <div className="space-y-6 w-full">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

@@ -166,7 +166,7 @@ export default function AuditLogPage() {
               key={r}
               onClick={() => setFilterRole(r)}
               className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
-                filterRole === r ? 'bg-slate-900 text-white border-slate-900' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-400'
+                filterRole === r ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'
               }`}
             >
               {r === 'all' ? 'Barchasi' : ROLE_LABELS[r]}

@@ -1,0 +1,189 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function role() {
+      return signedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? userDoc().data.role
+        : null;
+    }
+
+    function isAdmin() {
+      return role() == 'admin';
+    }
+
+    function isClinic() {
+      return role() == 'clinic';
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function ownsClinic(data) {
+      return signedIn() && data.clinicId == request.auth.uid;
+    }
+
+    function ownsFromClinic(data) {
+      return signedIn() && data.fromClinicId == request.auth.uid;
+    }
+
+    match /users/{uid} {
+      allow read: if isAdmin() || isOwner(uid);
+      allow create, update, delete: if false;
+    }
+
+    match /clinics/{clinicId} {
+      allow read: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /doctors/{doctorId} {
+      allow read: if isAdmin() || isOwner(doctorId);
+      allow create, update, delete: if false;
+    }
+
+    match /patients/{patientId} {
+      allow read: if isAdmin() || isOwner(patientId);
+      allow create, update, delete: if false;
+    }
+
+    match /documents/{docId} {
+      allow read: if isAdmin() || isOwner(resource.data.ownerId) || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /requests/{requestId} {
+      allow read: if isAdmin()
+        || isOwner(resource.data.fromUserId)
+        || (signedIn() && resource.data.toClinicId == request.auth.uid);
+      allow create, update, delete: if false;
+    }
+
+    match /compliance/{itemId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /erp_records/{recordId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /inspection_records/{recordId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /rag_queries/{queryId} {
+      allow read: if isAdmin() || isOwner(resource.data.userId);
+      allow create, update, delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isAdmin() || isOwner(resource.data.userId);
+      allow create, update, delete: if false;
+    }
+
+    match /messages/{messageId} {
+      allow read: if isAdmin()
+        || isOwner(resource.data.fromUserId)
+        || isOwner(resource.data.toUserId);
+      allow create, update, delete: if false;
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if isAdmin()
+        || ownsClinic(resource.data)
+        || isOwner(resource.data.patientId);
+      allow create, update, delete: if false;
+    }
+
+    match /surveys/{surveyId} {
+      allow read: if isAdmin() || ownsClinic(resource.data) || isOwner(resource.data.patientId);
+      allow create, update, delete: if false;
+    }
+
+    match /staff/{staffId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /inventory/{itemId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /equipment/{itemId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /clinic_events/{eventId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /vaccinations/{recordId} {
+      allow read: if isAdmin() || ownsClinic(resource.data) || isOwner(resource.data.patientId);
+      allow create, update, delete: if false;
+    }
+
+    match /shifts/{shiftId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /referrals/{referralId} {
+      allow read: if isAdmin() || ownsFromClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /complaints/{complaintId} {
+      allow read: if isAdmin() || ownsClinic(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /job_listings/{jobId} {
+      allow read: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /job_applications/{applicationId} {
+      allow read: if isAdmin() || isOwner(resource.data.applicantId);
+      allow create, update, delete: if false;
+    }
+
+    match /forum_posts/{postId} {
+      allow read: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /forum_replies/{replyId} {
+      allow read: if signedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /audit_logs/{auditId} {
+      allow read: if isAdmin();
+      allow create: if false;
+      allow update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

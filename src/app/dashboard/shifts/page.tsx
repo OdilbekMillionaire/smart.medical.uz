@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getShiftsByClinic, createShift, deleteShift } from '@/lib/firestore';
+import { useRouter } from 'next/navigation';
 import type { Shift } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -16,10 +16,27 @@ const DAYS = ['Du', 'Se', 'Ch', 'Pa', 'Ju', 'Sha', 'Ya'];
 
 const EMPTY = { staffName: '', role: 'Shifokor', date: '', startTime: '08:00', endTime: '17:00', notes: '' };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function ShiftsPage() {
-  const { user, userRole } = useAuth();
+  const { user, userRole, loading } = useAuth();
+  const router = useRouter();
   const [shifts, setShifts] = useState<Shift[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -31,21 +48,35 @@ export default function ShiftsPage() {
 
   const canEdit = userRole === 'clinic' || userRole === 'admin';
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
-    try { setShifts(await getShiftsByClinic(user.uid)); }
+    setDataLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ shifts: Shift[] }>('/api/shifts', token);
+      setShifts(data.shifts);
+    }
     catch { toast.error('Yuklashda xato'); }
-    finally { setLoading(false); }
-  }
+    finally { setDataLoading(false); }
+  }, [user]);
 
-  useEffect(() => { load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
 
   async function handleCreate() {
     if (!user || !form.staffName || !form.date) { toast.error('Xodim ismi va sana majburiy'); return; }
     setSaving(true);
     try {
-      await createShift({ clinicId: user.uid, staffId: user.uid + '_' + Date.now(), staffName: form.staffName, date: form.date, startTime: form.startTime, endTime: form.endTime, role: form.role, notes: form.notes || undefined, createdAt: new Date().toISOString() });
+      const token = await user.getIdToken();
+      await requestJson<Shift>('/api/shifts', token, {
+        method: 'POST',
+        body: JSON.stringify({ ...form, notes: form.notes || undefined }),
+      });
       toast.success('Navbat qo\'shildi');
       setShowForm(false); setForm(EMPTY); await load();
     } catch { toast.error('Saqlashda xato'); }
@@ -69,6 +100,22 @@ export default function ShiftsPage() {
   }
 
   const today = new Date().toISOString().split('T')[0];
+
+  async function handleDelete(id: string) {
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/shifts', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
+      await load();
+    } catch {
+      toast.error('O\'chirishda xato');
+    }
+  }
+
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
 
   return (
     <div className="space-y-5">
@@ -116,10 +163,10 @@ export default function ShiftsPage() {
         <Button variant="outline" size="sm" onClick={() => navWeek(1)}>Keyingi →</Button>
       </div>
 
-      {loading && <div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}</div>}
+      {dataLoading &&<div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}</div>}
 
       {/* Weekly grid */}
-      {!loading && (
+      {!dataLoading &&(
         <div className="overflow-x-auto">
           <div className="grid grid-cols-7 gap-1 min-w-[560px]">
             {weekDays.map((day, i) => {
@@ -137,7 +184,7 @@ export default function ShiftsPage() {
                         <p className="font-medium truncate">{s.staffName}</p>
                         <p className="text-blue-600">{s.startTime}–{s.endTime}</p>
                         {canEdit && (
-                          <button onClick={() => deleteShift(s.id).then(load)} className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity">×</button>
+                          <button onClick={() => handleDelete(s.id)} className="absolute top-0.5 right-0.5 opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-600 transition-opacity">×</button>
                         )}
                       </div>
                     ))}
@@ -151,7 +198,7 @@ export default function ShiftsPage() {
       )}
 
       {/* List view */}
-      {!loading && weekShifts.length > 0 && (
+      {!dataLoading &&weekShifts.length > 0 && (
         <Card>
           <CardHeader className="pb-3 border-b bg-slate-50"><CardTitle className="text-sm">Haftalik navbatlar ro&apos;yxati</CardTitle></CardHeader>
           <div className="divide-y">
@@ -168,7 +215,7 @@ export default function ShiftsPage() {
                     <span className="flex items-center gap-1"><User className="w-3 h-3" />{s.startTime} – {s.endTime}</span>
                   </div>
                 </div>
-                {canEdit && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-300 hover:text-red-500" onClick={() => deleteShift(s.id).then(load)}><Trash2 className="w-3.5 h-3.5" /></Button>}
+                {canEdit && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-300 hover:text-red-500" onClick={() => handleDelete(s.id)}><Trash2 className="w-3.5 h-3.5" /></Button>}
               </div>
             ))}
           </div>

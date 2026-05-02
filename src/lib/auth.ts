@@ -8,7 +8,7 @@ import {
   type UserCredential,
 } from 'firebase/auth';
 import { getFirebaseAuth, getFirebaseDb, getGoogleProvider } from '@/lib/firebase';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 import type { UserRole, BaseUser } from '@/types';
 
 export async function loginWithEmail(email: string, password: string) {
@@ -43,14 +43,23 @@ export async function createUserProfile(
   displayName: string,
   role: UserRole
 ): Promise<void> {
-  const userData: Omit<BaseUser, 'uid'> = {
-    email,
-    displayName,
-    role,
-    profileComplete: false,
-    createdAt: new Date().toISOString(),
-  };
-  await setDoc(doc(getFirebaseDb(), 'users', uid), { uid, ...userData });
+  const currentUser = getFirebaseAuth().currentUser;
+  if (!currentUser || currentUser.uid !== uid) {
+    throw new Error('Not authenticated');
+  }
+  const token = await currentUser.getIdToken();
+  const res = await fetch('/api/profile', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ displayName: displayName || email, role }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? 'Failed to create user profile');
+  }
 }
 
 export async function getUserRole(uid: string): Promise<UserRole | null> {

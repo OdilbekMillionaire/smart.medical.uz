@@ -14,8 +14,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { updateProfile } from 'firebase/auth';
-import { doc, updateDoc } from 'firebase/firestore';
-import { getFirebaseDb } from '@/lib/firebase';
 import { Edit2, Save, X, RefreshCw, Plus, MapPin, CheckCircle2, UploadCloud, FileText, Loader2 } from 'lucide-react';
 import { uploadClinicDocument, uploadDoctorDocument } from '@/lib/storage';
 
@@ -30,6 +28,22 @@ const ROLE_COLORS: Record<string, string> = {
   doctor: 'bg-green-100 text-green-700',
   patient: 'bg-purple-100 text-purple-700',
 };
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 export default function ProfilePage() {
   const { user, userProfile, userRole } = useAuth();
@@ -149,9 +163,10 @@ export default function ProfilePage() {
         });
       }
 
-      await updateDoc(doc(getFirebaseDb(), 'users', user.uid), {
-        ...formData,
-        updatedAt: new Date().toISOString()
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/profile', token, {
+        method: 'PATCH',
+        body: JSON.stringify(formData),
       });
 
       toast.success(t.common.success);
@@ -562,7 +577,7 @@ export default function ProfilePage() {
       <Card className="bg-slate-50 shadow-none border-dashed border-slate-200">
         <CardContent className="p-4 space-y-3">
           <div className="flex justify-between text-sm">
-            <span className="text-muted-foreground">System UID</span>
+            <span className="text-muted-foreground">{t.profile.systemUid}</span>
             <span className="font-mono text-xs">{user?.uid}</span>
           </div>
           <div className="flex justify-between text-sm">

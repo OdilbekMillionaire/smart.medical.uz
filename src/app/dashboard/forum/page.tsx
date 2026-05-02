@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { Card, CardContent } from '@/components/ui/card';
@@ -17,13 +17,25 @@ import {
   Clock, ChevronDown, Bell, BellOff,
   CheckCircle2, Award, Hash,
 } from 'lucide-react';
-import {
-  getForumPosts, createForumPost, deleteForumPost,
-  incrementForumViews, getForumReplies, createForumReply,
-} from '@/lib/firestore';
-import type { ForumPost, ForumReply, UserRole } from '@/types';
+import type { ForumPost, ForumReply } from '@/types';
 
 type LK = 'uz' | 'uz_cyrillic' | 'ru' | 'en' | 'kk';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 const L: Record<LK, {
   title: string; subtitle: string; newPost: string; searchPlaceholder: string;
@@ -489,23 +501,25 @@ export default function ForumPage() {
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const replyRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    loadPosts();
-  }, []);
-
-  async function loadPosts() {
+  const loadPosts = useCallback(async () => {
+    if (!user) {
+      setLoadingPosts(false);
+      return;
+    }
     setLoadingPosts(true);
     try {
-      const data = await getForumPosts(activeCategory === 'all' ? undefined : activeCategory);
-      setPosts(data);
+      const token = await user.getIdToken();
+      const params = activeCategory === 'all' ? '' : `?category=${encodeURIComponent(activeCategory)}`;
+      const data = await requestJson<{ posts: ForumPost[] }>(`/api/forum${params}`, token);
+      setPosts(data.posts);
     } catch {
       // silently fail — use empty state
     } finally {
       setLoadingPosts(false);
     }
-  }
+  }, [activeCategory, user]);
 
-  useEffect(() => { loadPosts(); }, [activeCategory]);
+  useEffect(() => { loadPosts(); }, [loadPosts]);
 
   const filtered = useMemo(() => {
     let list = [...posts];
@@ -533,17 +547,16 @@ export default function ForumPage() {
     if (!user) return;
     setSubmitting(true);
     try {
-      await createForumPost({
+      const token = await user.getIdToken();
+      await requestJson<ForumPost>('/api/forum', token, {
+        method: 'POST',
+        body: JSON.stringify({
         title: newTitle.trim(),
         body: newBody.trim(),
         category: newCategory,
-        authorId: isAnonymous ? 'anonymous' : user.uid,
         authorName: isAnonymous ? 'Anonim' : (userProfile?.displayName ?? user.email ?? 'User'),
-        authorRole: (userRole ?? 'doctor') as UserRole,
-        replies: 0,
-        views: 0,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
+        anonymous: isAnonymous,
+      }),
       });
       toast.success(tx.createSuccess);
       setShowNewModal(false);
@@ -562,9 +575,14 @@ export default function ForumPage() {
     setLoadingReplies(true);
     setShowReplies(true);
     try {
-      await incrementForumViews(post.id);
-      const data = await getForumReplies(post.id);
-      setReplies(data);
+      if (!user) throw new Error('Unauthorized');
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/forum', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id: post.id, action: 'view' }),
+      });
+      const data = await requestJson<{ replies: ForumReply[] }>(`/api/forum/replies?postId=${encodeURIComponent(post.id)}`, token);
+      setReplies(data.replies);
     } catch { /* ignore */ } finally {
       setLoadingReplies(false);
     }
@@ -575,18 +593,21 @@ export default function ForumPage() {
     if (!replyText.trim() || !user || !selectedPost) return;
     setSendingReply(true);
     try {
-      await createForumReply({
+      const token = await user.getIdToken();
+      await requestJson<ForumReply>('/api/forum/replies', token, {
+        method: 'POST',
+        body: JSON.stringify({
         postId: selectedPost.id,
         body: replyText.trim(),
-        authorId: user.uid,
         authorName: userProfile?.displayName ?? user.email ?? 'User',
-        authorRole: (userRole ?? 'doctor') as UserRole,
-        createdAt: new Date().toISOString(),
+      }),
       });
       toast.success(tx.replySuccess);
       setReplyText('');
-      const data = await getForumReplies(selectedPost.id);
-      setReplies(data);
+      const data = await requestJson<{ replies: ForumReply[] }>(`/api/forum/replies?postId=${encodeURIComponent(selectedPost.id)}`, token);
+      setReplies(data.replies);
+      setSelectedPost((prev) => prev ? { ...prev, replies: (prev.replies ?? 0) + 1 } : prev);
+      setPosts((prev) => prev.map((post) => post.id === selectedPost.id ? { ...post, replies: (post.replies ?? 0) + 1 } : post));
     } catch {
       toast.error(tx.replyError);
     } finally {
@@ -595,8 +616,13 @@ export default function ForumPage() {
   }
 
   async function handleDelete(postId: string) {
+    if (!user) return;
     try {
-      await deleteForumPost(postId);
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/forum', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id: postId }),
+      });
       toast.success(tx.deleteSuccess);
       if (selectedPost?.id === postId) setSelectedPost(null);
       loadPosts();
@@ -646,7 +672,7 @@ export default function ForumPage() {
   ];
 
   return (
-    <div className="max-w-6xl space-y-5">
+    <div className="w-full space-y-5">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>

@@ -12,13 +12,15 @@ import { Skeleton } from '@/components/ui/skeleton';
 import {
   getAllClinics, getUsersByRole, getPendingDocuments,
   getOverdueCompliance, getDocumentsByOwner, getComplianceByClinic,
-  getRequestsByUser,
+  getRequestsByUser, getAppointmentsByPatient, getVaccinationsByPatient,
+  getMessagesByUser, getSurveysByPatient,
 } from '@/lib/firestore';
 import {
   Building2, Users, FileText, Clock, Bot, ArrowRight,
   AlertTriangle, MessageSquare, ShieldCheck,
   TrendingUp, Newspaper, ExternalLink, Zap, Database,
   Calendar, Bell, Globe, BarChart3, UserCheck,
+  Syringe, QrCode, Star,
 } from 'lucide-react';
 
 // ─── Locale mapping for date formatting ──────────────────────────────────────
@@ -59,6 +61,25 @@ function QuickAction({ icon, label, href, color }: { icon: React.ReactNode; labe
       <div className={`flex flex-col items-center gap-2 p-4 rounded-xl border bg-white hover:shadow-md transition-all cursor-pointer group ${color}`}>
         <div className="rounded-full bg-white p-3 shadow-sm group-hover:scale-110 transition-transform">{icon}</div>
         <span className="text-xs font-semibold text-center text-slate-700 leading-tight">{label}</span>
+      </div>
+    </Link>
+  );
+}
+
+function WorkspaceCard({ icon, title, description, href }: {
+  icon: React.ReactNode;
+  title: string;
+  description: string;
+  href: string;
+}) {
+  return (
+    <Link href={href}>
+      <div className="h-full rounded-xl border bg-white p-4 transition-all hover:border-slate-300 hover:shadow-md">
+        <div className="mb-3 flex h-9 w-9 items-center justify-center rounded-lg bg-slate-100 text-slate-700">
+          {icon}
+        </div>
+        <p className="text-sm font-semibold text-slate-900">{title}</p>
+        <p className="mt-1 text-xs leading-relaxed text-slate-500">{description}</p>
       </div>
     </Link>
   );
@@ -151,6 +172,33 @@ function AdminDashboard() {
             {stats?.pendingDocs ?? '—'} {t.dashboard.pendingDocsBadge}
           </Badge>
         </div>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <WorkspaceCard
+          icon={<Building2 className="h-4 w-4" />}
+          title={`${t.nav.clinics} / ${t.nav.users}`}
+          description={t.dashboard.totalUsers}
+          href="/dashboard/clinics"
+        />
+        <WorkspaceCard
+          icon={<FileText className="h-4 w-4" />}
+          title={`${t.nav.documents} / ${t.nav.requests}`}
+          description={t.dashboard.pendingDocuments}
+          href="/dashboard/documents"
+        />
+        <WorkspaceCard
+          icon={<ShieldCheck className="h-4 w-4" />}
+          title={`${t.nav.audit} / ${t.nav.compliance}`}
+          description={t.dashboard.overdueItems}
+          href="/dashboard/audit"
+        />
+        <WorkspaceCard
+          icon={<BarChart3 className="h-4 w-4" />}
+          title={`${t.nav.reports} / ${t.nav.exports}`}
+          description={t.dashboard.platformStatus}
+          href="/dashboard/reports"
+        />
       </div>
 
       {/* KPI cards */}
@@ -281,6 +329,33 @@ function ClinicDashboard() {
         </div>
       </div>
 
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <WorkspaceCard
+          icon={<Calendar className="h-4 w-4" />}
+          title={`${t.nav.appointments} / ${t.nav.shifts}`}
+          description={t.dashboard.within30Days}
+          href="/dashboard/appointments"
+        />
+        <WorkspaceCard
+          icon={<Database className="h-4 w-4" />}
+          title={`${t.nav.erp} / ${t.nav.staff}`}
+          description={t.dashboard.erpSystem}
+          href="/dashboard/erp"
+        />
+        <WorkspaceCard
+          icon={<ShieldCheck className="h-4 w-4" />}
+          title={`${t.nav.compliance} / ${t.nav.inspection}`}
+          description={t.dashboard.overdueItems}
+          href="/dashboard/compliance"
+        />
+        <WorkspaceCard
+          icon={<FileText className="h-4 w-4" />}
+          title={`${t.nav.documents} / ${t.nav.requests}`}
+          description={t.dashboard.myDocuments}
+          href="/dashboard/documents"
+        />
+      </div>
+
       {/* KPI cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard label={t.dashboard.myDocuments} value={stats?.myDocs ?? null} href="/dashboard/documents"
@@ -375,7 +450,7 @@ function UserDashboard() {
   const { user, userProfile, userRole } = useAuth();
   const { t, lang } = useLanguage();
   const [myDocs, setMyDocs] = useState<number | null>(null);
-  const [requests, setRequests] = useState<number | null>(null);
+  const [unreadMessages, setUnreadMessages] = useState<number | null>(null);
 
   const profileFields = userProfile ? Object.values(userProfile).filter(Boolean).length : 0;
   const profileProgress = Math.min(100, Math.round((profileFields / 10) * 100));
@@ -386,7 +461,9 @@ function UserDashboard() {
   useEffect(() => {
     if (!user) return;
     getDocumentsByOwner(user.uid).then((d) => setMyDocs(d.length)).catch(() => setMyDocs(0));
-    getRequestsByUser(user.uid).then((r) => setRequests(r.length)).catch(() => setRequests(0));
+    getMessagesByUser(user.uid)
+      .then((messages) => setUnreadMessages(messages.filter((message) => !message.read).length))
+      .catch(() => setUnreadMessages(0));
   }, [user]);
 
   return (
@@ -408,7 +485,7 @@ function UserDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
         <StatCard label={t.documents.myTitle} value={myDocs} href="/dashboard/documents"
           icon={<FileText className="h-6 w-6 text-blue-600" />} color="border-l-blue-500 bg-blue-50/30" />
-        <StatCard label={t.dashboard.myRequests} value={requests} href="/dashboard/requests"
+        <StatCard label={t.nav.messages} value={unreadMessages} href="/dashboard/messages"
           icon={<MessageSquare className="h-6 w-6 text-purple-600" />} color="border-l-purple-500 bg-purple-50/30" />
         <Card className="border-l-4 border-l-green-500 bg-green-50/30 col-span-2 lg:col-span-1">
           <CardContent className="p-5">
@@ -429,14 +506,12 @@ function UserDashboard() {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
             <QuickAction icon={<Bot className="w-5 h-5 text-cyan-600" />} label={t.dashboard.aiAdvisor} href="/ai" color="hover:border-cyan-200" />
             <QuickAction icon={<FileText className="w-5 h-5 text-blue-600" />} label={t.dashboard.myDocumentsShort} href="/dashboard/documents" color="hover:border-blue-200" />
-            <QuickAction icon={<MessageSquare className="w-5 h-5 text-purple-600" />} label={t.dashboard.sendRequest} href="/dashboard/requests" color="hover:border-purple-200" />
-            {isDoctor
-              ? <QuickAction icon={<TrendingUp className="w-5 h-5 text-green-600" />} label={t.dashboard.forum} href="/dashboard/forum" color="hover:border-green-200" />
-              : <QuickAction icon={<Bell className="w-5 h-5 text-orange-600" />} label={t.dashboard.notificationsLabel} href="/dashboard/notifications" color="hover:border-orange-200" />
-            }
+            <QuickAction icon={<MessageSquare className="w-5 h-5 text-purple-600" />} label={t.nav.messages} href="/dashboard/messages" color="hover:border-purple-200" />
+            <QuickAction icon={<ArrowRight className="w-5 h-5 text-orange-600" />} label={t.nav.referrals} href="/dashboard/referrals" color="hover:border-orange-200" />
+            <QuickAction icon={<TrendingUp className="w-5 h-5 text-green-600" />} label={t.dashboard.forum} href="/dashboard/forum" color="hover:border-green-200" />
           </div>
         </CardContent>
       </Card>
@@ -485,6 +560,105 @@ function UserDashboard() {
 
 // ─── Root ─────────────────────────────────────────────────────────────────────
 
+function PatientDashboard() {
+  const { user, userProfile } = useAuth();
+  const { t, lang } = useLanguage();
+  const [stats, setStats] = useState<{
+    appointments: number;
+    vaccinations: number;
+    unreadMessages: number;
+    surveys: number;
+  } | null>(null);
+
+  const profileFields = userProfile ? Object.values(userProfile).filter(Boolean).length : 0;
+  const profileProgress = Math.min(100, Math.round((profileFields / 10) * 100));
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const displayName = (userProfile as any)?.fullName ?? userProfile?.displayName ?? t.nav.profile;
+
+  useEffect(() => {
+    if (!user) return;
+    Promise.all([
+      getAppointmentsByPatient(user.uid),
+      getVaccinationsByPatient(user.uid),
+      getMessagesByUser(user.uid),
+      getSurveysByPatient(user.uid),
+    ]).then(([appointments, vaccinations, messages, surveys]) => {
+      setStats({
+        appointments: appointments.length,
+        vaccinations: vaccinations.length,
+        unreadMessages: messages.filter((message) => !message.read).length,
+        surveys: surveys.length,
+      });
+    }).catch(() => setStats({ appointments: 0, vaccinations: 0, unreadMessages: 0, surveys: 0 }));
+  }, [user]);
+
+  return (
+    <div className="space-y-6">
+      <div className="rounded-2xl bg-gradient-to-r from-emerald-600 to-cyan-600 text-white p-6">
+        <p className="text-emerald-100 text-sm">
+          {new Date().toLocaleDateString(DATE_LOCALE[lang], { weekday: 'long', day: 'numeric', month: 'long' })}
+        </p>
+        <h1 className="text-2xl font-bold mt-1">
+          {t.dashboard.welcomeUser}, {displayName}!
+        </h1>
+        <p className="text-emerald-100 text-sm mt-1">
+          {t.dashboard.patientWelcome}
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <StatCard label={t.nav.appointments} value={stats?.appointments ?? null} href="/dashboard/appointments"
+          icon={<Calendar className="h-6 w-6 text-blue-600" />} color="border-l-blue-500 bg-blue-50/30" />
+        <StatCard label={t.nav.vaccinations} value={stats?.vaccinations ?? null} href="/dashboard/vaccinations"
+          icon={<Syringe className="h-6 w-6 text-emerald-600" />} color="border-l-emerald-500 bg-emerald-50/30" />
+        <StatCard label={t.nav.messages} value={stats?.unreadMessages ?? null} href="/dashboard/messages"
+          icon={<Bell className="h-6 w-6 text-orange-600" />} color="border-l-orange-500 bg-orange-50/30" />
+        <StatCard label={t.nav.surveys} value={stats?.surveys ?? null} href="/dashboard/surveys"
+          icon={<Star className="h-6 w-6 text-purple-600" />} color="border-l-purple-500 bg-purple-50/30" />
+      </div>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Zap className="w-4 h-4 text-yellow-500" /> {t.dashboard.quickActions}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+            <QuickAction icon={<Calendar className="w-5 h-5 text-blue-600" />} label={t.nav.appointments} href="/dashboard/appointments" color="hover:border-blue-200" />
+            <QuickAction icon={<Syringe className="w-5 h-5 text-emerald-600" />} label={t.nav.vaccinations} href="/dashboard/vaccinations" color="hover:border-emerald-200" />
+            <QuickAction icon={<QrCode className="w-5 h-5 text-slate-700" />} label={t.nav.qrCard} href="/dashboard/qr-card" color="hover:border-slate-200" />
+            <QuickAction icon={<MessageSquare className="w-5 h-5 text-purple-600" />} label={t.nav.messages} href="/dashboard/messages" color="hover:border-purple-200" />
+            <QuickAction icon={<Star className="w-5 h-5 text-amber-600" />} label={t.nav.surveys} href="/dashboard/surveys" color="hover:border-amber-200" />
+            <QuickAction icon={<Bot className="w-5 h-5 text-cyan-600" />} label={t.dashboard.aiAdvisor} href="/ai" color="hover:border-cyan-200" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="grid lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          <NewsWidget />
+        </div>
+        <Card className="border-emerald-200 bg-emerald-50">
+          <CardContent className="p-5">
+            <UserCheck className="w-8 h-8 text-emerald-700 mb-3" />
+            <h3 className="font-bold text-emerald-900">{t.dashboard.profileCompletion}</h3>
+            <Progress value={profileProgress} className="h-2 mt-3 bg-emerald-100" />
+            <p className="text-sm text-emerald-700 mt-2">
+              {t.dashboard.percentDone.replace('{percent}', String(profileProgress))}
+            </p>
+            <Link href="/dashboard/profile">
+              <Button size="sm" className="mt-4 w-full bg-emerald-700 hover:bg-emerald-800">
+                {t.dashboard.editProfile}
+              </Button>
+            </Link>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
+
 export default function DashboardPage() {
   const { userRole, loading } = useAuth();
 
@@ -502,5 +676,6 @@ export default function DashboardPage() {
 
   if (userRole === 'admin') return <AdminDashboard />;
   if (userRole === 'clinic') return <ClinicDashboard />;
-  return <UserDashboard />;
+  if (userRole === 'doctor') return <UserDashboard />;
+  return <PatientDashboard />;
 }

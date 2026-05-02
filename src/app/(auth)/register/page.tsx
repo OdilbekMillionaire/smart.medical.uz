@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
@@ -25,34 +25,47 @@ import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
 import { getPasswordStrength } from '@/lib/export';
 import type { UserRole } from '@/types';
 
-const registerSchema = z
-  .object({
-    email: z
-      .string()
-      .min(1, 'Email kiritilishi shart')
-      .email("Noto'g'ri email format"),
-    password: z
-      .string()
-      .min(8, 'Parol kamida 8 ta belgidan iborat bo\'lishi kerak'),
-    confirmPassword: z.string().min(1, 'Parolni tasdiqlang'),
-  })
-  .refine((d) => d.password === d.confirmPassword, {
-    message: 'Parollar mos kelmayapti',
-    path: ['confirmPassword'],
-  });
-
-type RegisterFormData = z.infer<typeof registerSchema>;
+type RegisterFormData = {
+  email: string;
+  password: string;
+  confirmPassword: string;
+};
 
 type Step = 'credentials' | 'role';
 
 export default function RegisterPage() {
   const router = useRouter();
   const { t } = useLanguage();
+  const registerSchema = useMemo(
+    () => z
+      .object({
+        email: z
+          .string()
+          .min(1, t.auth.validation.emailRequired)
+          .email(t.auth.validation.emailInvalid),
+        password: z
+          .string()
+          .min(8, t.auth.validation.passwordMin),
+        confirmPassword: z.string().min(1, t.auth.validation.passwordRequired),
+      })
+      .refine((d) => d.password === d.confirmPassword, {
+        message: t.auth.validation.passwordMatch,
+        path: ['confirmPassword'],
+      }),
+    [t]
+  );
   const ROLES: { value: UserRole; label: string; icon: string; description: string }[] = [
     { value: 'clinic', label: t.auth.roleClinic, icon: '🏥', description: t.auth.signUpDesc },
     { value: 'doctor', label: t.auth.roleDoctor, icon: '👨‍⚕️', description: t.auth.signUpDesc },
     { value: 'patient', label: t.auth.rolePatient, icon: '👤', description: t.auth.signUpDesc },
   ];
+  const roleInitials = { admin: 'A', clinic: 'C', doctor: 'D', patient: 'P' } as const;
+  const roleDescriptions = {
+    admin: t.auth.roleAdmin,
+    clinic: t.auth.roleClinicDesc,
+    doctor: t.auth.roleDoctorDesc,
+    patient: t.auth.rolePatientDesc,
+  } as const;
   const [step, setStep] = useState<Step>('credentials');
   const [formData, setFormData] = useState<RegisterFormData | null>(null);
   const [selectedRole, setSelectedRole] = useState<UserRole | null>(null);
@@ -81,7 +94,7 @@ export default function RegisterPage() {
         else router.replace('/onboarding/patient');
       } catch (err: unknown) {
         console.error('[Google register redirect error]', err);
-        toast.error(`Google xatosi: ${err instanceof Error ? err.message : err}`);
+        toast.error(`${t.auth.googleError}: ${err instanceof Error ? err.message : err}`);
       }
     }
     handleRedirectResult();
@@ -155,7 +168,7 @@ export default function RegisterPage() {
       }
     } catch (err: unknown) {
       console.error('[Google register error]', err);
-      toast.error(`Google xatosi: ${err instanceof Error ? err.message : err}`);
+      toast.error(`${t.auth.googleError}: ${err instanceof Error ? err.message : err}`);
       setGoogleLoading(false);
     }
   }
@@ -183,10 +196,12 @@ export default function RegisterPage() {
                     : 'border-slate-200 hover:border-slate-400'
                 }`}
               >
-                <span className="text-3xl">{role.icon}</span>
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-sm font-bold text-slate-700">
+                  {roleInitials[role.value]}
+                </span>
                 <div>
                   <p className="font-semibold">{role.label}</p>
-                  <p className="text-sm text-muted-foreground">{role.description}</p>
+                  <p className="text-sm text-muted-foreground">{roleDescriptions[role.value]}</p>
                 </div>
               </button>
             ))}
@@ -254,7 +269,7 @@ export default function RegisterPage() {
             <Input
               id="email"
               type="email"
-              placeholder="email@example.com"
+              placeholder={t.auth.emailPlaceholder}
               {...register('email')}
             />
             {errors.email && (
@@ -264,7 +279,7 @@ export default function RegisterPage() {
           <div className="space-y-2">
             <Label htmlFor="password">{t.auth.password}</Label>
             <div className="relative">
-              <Input id="password" type={showPassword ? 'text' : 'password'} placeholder="Kamida 8 ta belgi" className="pr-10" {...register('password')} />
+              <Input id="password" type={showPassword ? 'text' : 'password'} placeholder={t.auth.passwordMinPlaceholder} className="pr-10" {...register('password')} />
               <button type="button" onClick={() => setShowPassword((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>
@@ -291,7 +306,7 @@ export default function RegisterPage() {
           <div className="space-y-2">
             <Label htmlFor="confirmPassword">{t.auth.confirmPassword}</Label>
             <div className="relative">
-              <Input id="confirmPassword" type={showConfirm ? 'text' : 'password'} placeholder="Parolni qayta kiriting" className="pr-10" {...register('confirmPassword')} />
+              <Input id="confirmPassword" type={showConfirm ? 'text' : 'password'} placeholder={t.auth.confirmPasswordPlaceholder} className="pr-10" {...register('confirmPassword')} />
               <button type="button" onClick={() => setShowConfirm((v) => !v)} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                 {showConfirm ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </button>

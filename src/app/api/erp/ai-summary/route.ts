@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth } from '@/lib/firebase-admin';
 import { generateForTask, VISIT_SUMMARY_PROMPT } from '@/lib/vertex-ai';
+import { isApiError, parseJson, requireApiUser, requireRole } from '@/lib/api-auth';
+import { z } from 'zod';
+
+const VisitSummarySchema = z.object({
+  patientName: z.string().trim().min(1).max(200),
+  patientAge: z.string().trim().max(40).optional(),
+  visitDate: z.string().trim().min(1).max(40),
+  diagnosis: z.string().trim().min(1).max(20000),
+  prescriptions: z.array(z.string().max(5000)).max(100).default([]),
+  procedures: z.array(z.string().max(5000)).max(100).default([]),
+  doctorName: z.string().trim().max(200).optional(),
+  nextVisit: z.string().trim().max(40).optional(),
+  notes: z.string().max(20000).optional(),
+});
 
 // ── Feature 3: AI Patient Visit Summary Generator ────────────────────────────
 // Model: Gemini 2.5 Pro (detailed medical analysis)
@@ -9,24 +22,13 @@ import { generateForTask, VISIT_SUMMARY_PROMPT } from '@/lib/vertex-ai';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    await getAdminAuth().verifyIdToken(token);
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
+    const roleError = requireRole(auth, ['admin', 'clinic', 'doctor']);
+    if (roleError) return roleError;
 
-    const body = await req.json() as {
-      patientName: string;
-      patientAge?: string;
-      visitDate: string;
-      diagnosis: string;
-      prescriptions: string[];
-      procedures: string[];
-      doctorName?: string;
-      nextVisit?: string;
-      notes?: string;
-    };
+    const body = await parseJson(req, VisitSummarySchema);
+    if (body instanceof NextResponse) return body;
 
     const prescriptionList = body.prescriptions.length > 0
       ? body.prescriptions.map((p, i) => `${i + 1}. ${p}`).join('\n')

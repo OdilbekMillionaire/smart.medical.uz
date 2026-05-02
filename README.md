@@ -16,6 +16,36 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
+## Production Checks
+
+Run the local verification suite before deploying:
+
+```bash
+npm run verify
+npm run build
+```
+
+Production deployment notes live in [PRODUCTION_CHECKLIST.md](./PRODUCTION_CHECKLIST.md).
+
+With the local server running, route smoke tests are available:
+
+```bash
+npm run build
+npm run preview
+npm run qa:routes
+npm run qa:api-auth
+npm run qa:all
+```
+
+For real Firebase role QA, run the production preview and then:
+
+```bash
+npm run qa:firebase-roles
+npm run qa:browser-roles
+```
+
+These create temporary admin, clinic, doctor, and patient users/docs in the configured Firebase project, exercise representative API workflows plus browser email/password login, and clean up the QA data afterwards.
+
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.

@@ -40,7 +40,7 @@ export default function UsersPage() {
       .then((data) => setUsers(data as BaseUser[]))
       .catch(() => toast.error(t.common.error))
       .finally(() => setLoading(false));
-  }, [userRole, router]);
+  }, [userRole, router, t.common.error]);
 
   const filtered = users.filter((u) => {
     const matchesSearch =

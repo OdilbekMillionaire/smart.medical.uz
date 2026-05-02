@@ -1,10 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { createERPRecord } from '@/lib/firestore';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -15,6 +14,7 @@ import { ArrowLeft, Plus, X, Bot, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 import { getAuth } from 'firebase/auth';
 import { getFirebaseAuth } from '@/lib/firebase';
+import type { ERPRecord } from '@/types';
 
 async function getToken(): Promise<string> {
   const auth = getFirebaseAuth();
@@ -23,8 +23,24 @@ async function getToken(): Promise<string> {
   return user.getIdToken();
 }
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function NewERPPage() {
-  const { user } = useAuth();
+  const { user, userRole, loading } = useAuth();
   const { t } = useLanguage();
   const router = useRouter();
   const [patientId, setPatientId] = useState('');
@@ -37,6 +53,12 @@ export default function NewERPPage() {
   const [saving, setSaving] = useState(false);
   const [aiSummary, setAiSummary] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+
+  useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
 
   async function handleGenerateAISummary() {
     if (!diagnosis.trim()) {
@@ -99,8 +121,10 @@ export default function NewERPPage() {
 
     setSaving(true);
     try {
-      await createERPRecord({
-        clinicId: user.uid,
+      const token = await getToken();
+      await requestJson<ERPRecord>('/api/clinic-erp', token, {
+        method: 'POST',
+        body: JSON.stringify({
         patientId: patientId.trim(),
         visitDate,
         diagnosis: diagnosis.trim(),
@@ -109,6 +133,7 @@ export default function NewERPPage() {
         nextVisit: nextVisit || undefined,
         assignedDoctorId: assignedDoctorId.trim() || user.uid,
         cleaningLogs: [],
+      }),
       });
       toast.success(t.erp.saved);
       router.push('/dashboard/erp');
@@ -118,6 +143,8 @@ export default function NewERPPage() {
       setSaving(false);
     }
   }
+
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">

@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useAuth } from '@/contexts/AuthContext';
-import { getComplianceByClinic, getAllCompliance, updateComplianceItem, deleteComplianceItem } from '@/lib/firestore';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -13,6 +12,22 @@ import { exportComplianceToCSV } from '@/lib/export';
 import { useLanguage } from '@/contexts/LanguageContext';
 import type { ComplianceItem } from '@/types';
 import { differenceInDays, parseISO } from 'date-fns';
+
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 const TYPE_COLORS: Record<ComplianceItem['type'], string> = {
   license: 'bg-blue-100 text-blue-700',
@@ -66,7 +81,14 @@ function StatusBadge({ item, doneLabel, overdueLabel, daysLabel }: {
 
 export default function CompliancePage() {
   const { user, userRole } = useAuth();
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
+  const DATE_LOCALE: Record<string, string> = {
+    uz: 'uz-UZ',
+    uz_cyrillic: 'uz-UZ',
+    ru: 'ru-RU',
+    en: 'en-US',
+    kk: 'kk-KZ',
+  };
   const TYPE_LABELS: Record<ComplianceItem['type'], string> = {
     license: t.compliance.types.license,
     certification: t.compliance.types.certification,
@@ -79,6 +101,29 @@ export default function CompliancePage() {
   const [checking, setChecking] = useState(false);
   const [aiAdvice, setAiAdvice] = useState('');
   const [aiLoading, setAiLoading] = useState(false);
+
+  const loadItems = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ items: ComplianceItem[] }>('/api/compliance', token);
+      const now = new Date();
+      const updated = data.items.map((item) => ({
+        ...item,
+        status: item.status === 'done'
+          ? 'done' as const
+          : parseISO(item.dueDate) < now
+          ? 'overdue' as const
+          : 'upcoming' as const,
+      }));
+      setItems(updated);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
+    } finally {
+      setLoading(false);
+    }
+  }, [t.common.error, user]);
 
   async function runAIAdvisor() {
     if (!user) return;
@@ -117,11 +162,7 @@ export default function CompliancePage() {
       const data = await res.json() as { success?: boolean; reminded?: number; error?: string };
       if (data.success) {
         toast.success(t.common.success);
-        // Reload items
-        const snap = userRole === 'admin'
-          ? await (await import('@/lib/firestore')).getAllCompliance()
-          : await (await import('@/lib/firestore')).getComplianceByClinic(user.uid);
-        setItems(snap);
+        await loadItems();
       } else {
         toast.error(data.error ?? t.common.error);
       }
@@ -133,49 +174,36 @@ export default function CompliancePage() {
   };
 
   useEffect(() => {
-    if (!user) return;
-    async function load() {
-      try {
-        const data = userRole === 'admin'
-          ? await getAllCompliance()
-          : await getComplianceByClinic(user!.uid);
-        // Recompute statuses based on current date
-        const now = new Date();
-        const updated = data.map((item) => ({
-          ...item,
-          status: item.status === 'done'
-            ? 'done' as const
-            : parseISO(item.dueDate) < now
-            ? 'overdue' as const
-            : 'upcoming' as const,
-        }));
-        setItems(updated);
-      } catch {
-        toast.error(t.common.error);
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, [user, userRole]);
+    loadItems();
+  }, [loadItems]);
 
   async function markDone(item: ComplianceItem) {
     try {
-      await updateComplianceItem(item.id, { status: 'done' });
-      setItems((prev) => prev.map((i) => i.id === item.id ? { ...i, status: 'done' } : i));
+      if (!user) return;
+      const token = await user.getIdToken();
+      const updated = await requestJson<ComplianceItem>('/api/compliance', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id: item.id, status: 'done' }),
+      });
+      setItems((prev) => prev.map((i) => i.id === item.id ? updated : i));
       toast.success(t.compliance.markDone);
-    } catch {
-      toast.error(t.common.error);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
     }
   }
 
   async function handleDelete(item: ComplianceItem) {
     try {
-      await deleteComplianceItem(item.id);
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/compliance', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id: item.id }),
+      });
       setItems((prev) => prev.filter((i) => i.id !== item.id));
       toast.success(t.common.success);
-    } catch {
-      toast.error(t.common.error);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t.common.error);
     }
   }
 
@@ -324,7 +352,7 @@ export default function CompliancePage() {
                     <div className="flex items-center gap-3 mt-2 flex-wrap">
                       <StatusBadge item={item} doneLabel={t.compliance.done} overdueLabel={t.compliance.overdue} daysLabel={t.compliance.daysRemaining} />
                       <span className="text-xs text-muted-foreground">
-                        {t.compliance.dueDateLabel}: {new Date(item.dueDate).toLocaleDateString('uz-UZ')}
+                        {t.compliance.dueDateLabel}: {new Date(item.dueDate).toLocaleDateString(DATE_LOCALE[lang] || 'uz-UZ')}
                       </span>
                     </div>
                   </div>

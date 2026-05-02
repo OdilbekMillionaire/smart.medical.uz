@@ -60,7 +60,12 @@ export async function POST(req: NextRequest) {
   } else if (authHeader?.startsWith('Bearer ')) {
     try {
       const decoded = await getAdminAuth().verifyIdToken(authHeader.slice(7));
-      if ((decoded.role as string) === 'admin') isAuthorized = true;
+      if ((decoded.role as string) === 'admin') {
+        isAuthorized = true;
+      } else {
+        const userSnap = await getAdminDb().collection('users').doc(decoded.uid).get();
+        isAuthorized = userSnap.data()?.role === 'admin';
+      }
     } catch {
       // fall through
     }

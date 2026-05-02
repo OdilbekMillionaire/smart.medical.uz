@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth } from '@/lib/firebase-admin';
 import { generateForTask, INSPECTION_REMEDIATION_PROMPT } from '@/lib/vertex-ai';
-import type { InspectionItem } from '@/types';
+import { isApiError, parseJson, requireApiUser, requireRole } from '@/lib/api-auth';
+import { z } from 'zod';
+
+const RemediationSchema = z.object({
+  checklistType: z.string().trim().min(1).max(80),
+  clinicName: z.string().trim().max(200).optional(),
+  failedItems: z.array(z.object({
+    label: z.string().trim().min(1).max(1000),
+    status: z.enum(['pass', 'fail', 'warning']),
+    riskLevel: z.enum(['high', 'medium', 'low']),
+  })).max(100),
+});
 
 // ── Feature 5: AI Inspection Remediation Guide ──────────────────────────────
 // Model: Gemini 2.5 Pro (complex analysis + regulatory knowledge)
@@ -11,18 +21,13 @@ import type { InspectionItem } from '@/types';
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    await getAdminAuth().verifyIdToken(token);
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
+    const roleError = requireRole(auth, ['admin', 'clinic']);
+    if (roleError) return roleError;
 
-    const body = await req.json() as {
-      checklistType: string;
-      failedItems: InspectionItem[];
-      clinicName?: string;
-    };
+    const body = await parseJson(req, RemediationSchema);
+    if (body instanceof NextResponse) return body;
 
     if (!body.failedItems || body.failedItems.length === 0) {
       return NextResponse.json({
@@ -51,6 +56,7 @@ Har bir band uchun alohida bo'lim yarating.`;
 
     return NextResponse.json({
       remediation,
+      plan: remediation,
       model: 'gemini-2.5-pro',
       itemCount: body.failedItems.length,
     });

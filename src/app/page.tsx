@@ -1,19 +1,276 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { LanguageSwitcher } from '@/components/shared/LanguageSwitcher';
+import type { Language } from '@/contexts/LanguageContext';
 import {
   Bot, FileText, MessageSquare, Database, ShieldCheck,
   CheckCircle, ArrowRight, Menu, X, Star, TrendingUp, Users,
-  Building2, Zap, Lock, Globe, ChevronDown, Video, Stethoscope, Microscope, Search,
+  Building2, Zap, Lock, Globe, ChevronDown, Stethoscope,
   Shield, Server, Eye, RefreshCw, ClipboardCheck, ChevronLeft, ChevronRight,
   Clock, DollarSign, AlertTriangle, BarChart3, Layers, Phone, Mail, MapPin,
 } from 'lucide-react';
 import { ErrorBoundary } from '@/components/shared/ErrorBoundary';
+
+type MarketingFeature = {
+  title: string;
+  desc: string;
+  badge: string;
+};
+
+type PlanCopy = {
+  name: string;
+  desc: string;
+  features: string[];
+};
+
+type LandingMarketingCopy = {
+  features: MarketingFeature[];
+  securityFeatures: MarketingFeature[];
+  comparison: Array<{ before: string; after: string }>;
+  plans: PlanCopy[];
+};
+
+const LANDING_MARKETING_COPY: Record<Language, LandingMarketingCopy> = {
+  ru: {
+    features: [
+      { title: 'Операционная панель клиники', desc: 'Приемы, календарь, смены, персонал, оборудование и ресурсы собраны в одном рабочем пространстве для руководителя клиники.', badge: 'Operations' },
+      { title: 'Compliance Center', desc: 'Лицензии, дедлайны, проверки и AI-рекомендации помогают клинике заранее видеть регуляторные риски.', badge: 'Risk control' },
+      { title: 'Document Center', desc: 'Шаблоны договоров, приказов, протоколов и направлений создаются на нужном языке и уходят на согласование.', badge: 'AI drafting' },
+      { title: 'Cases & Requests', desc: 'Обращения, жалобы и направления превращаются в единый поток задач с ответственными и статусами.', badge: 'Workflow' },
+      { title: 'Портал врача', desc: 'Врачи получают документы, сообщения, направления, знания, форум и карьерные возможности без лишних модулей клиники.', badge: 'Doctor portal' },
+      { title: 'Портал пациента', desc: 'Пациенты видят записи, сообщения, вакцинации, QR-карту и профиль в отдельном простом кабинете.', badge: 'Patient portal' },
+      { title: 'AI-советник', desc: 'Gemini помогает с медицинско-правовыми вопросами, черновиками ответов, визитами и подготовкой к проверкам.', badge: 'Gemini' },
+      { title: 'Многоязычная работа', desc: 'Русский по умолчанию, плюс узбекская латиница, кириллица, английский и каракалпакский для команд и пациентов.', badge: '5 languages' },
+      { title: 'Безопасный доступ по ролям', desc: 'Админ, клиника, врач и пациент видят разные рабочие области, маршруты и данные.', badge: 'RBAC' },
+    ],
+    securityFeatures: [
+      { title: 'Шифрование AES-256', desc: 'Данные защищены при передаче и хранении.', badge: 'Security' },
+      { title: 'Ежедневные резервные копии', desc: 'Автоматические backup-процессы помогают защитить операционные данные.', badge: 'Backup' },
+      { title: 'Журнал аудита', desc: 'Ключевые действия пользователей фиксируются для контроля и расследований.', badge: 'Audit' },
+      { title: 'Доступ по ролям', desc: 'Каждая роль получает только нужные страницы и допустимые данные.', badge: 'RBAC' },
+      { title: 'Firebase и Google Cloud', desc: 'Платформа опирается на управляемую облачную инфраструктуру.', badge: 'Cloud' },
+      { title: 'Мониторинг состояния', desc: 'Health endpoints и QA-проверки помогают видеть деградацию до запуска.', badge: 'Ops' },
+    ],
+    comparison: [
+      { before: 'Дедлайны лицензий и сертификатов отслеживаются вручную', after: 'Compliance Center показывает сроки, риски и нужные действия' },
+      { before: 'Документы, жалобы и направления живут в разных папках', after: 'Cases и Document Center собирают все в понятные рабочие потоки' },
+      { before: 'Администратор, врач и пациент видят одинаковую перегруженную систему', after: 'Каждая роль получает свой кабинет, навигацию и задачи' },
+      { before: 'Подготовка к проверке занимает дни и зависит от памяти сотрудников', after: 'AI и чек-листы показывают готовность клиники заранее' },
+      { before: 'Руководитель клиники не видит операционную картину целиком', after: 'Дашборд показывает приемы, ресурсы, персонал и compliance-риски' },
+      { before: 'Команда вручную собирает отчеты и ответы', after: 'AI помогает готовить черновики, сводки и документы быстрее' },
+    ],
+    plans: [
+      {
+        name: 'Starter',
+        desc: 'Для небольшой клиники, которая хочет начать с документов и контроля сроков.',
+        features: ['1 кабинет клиники', 'AI-советник до 100 запросов в месяц', 'Document Center', 'Compliance deadlines', 'Requests модуль', 'Email-поддержка'],
+      },
+      {
+        name: 'Professional',
+        desc: 'Для растущей клиники, которой нужен полноценный операционный контур.',
+        features: ['Все роли и рабочие пространства', 'AI-советник без лимита', 'ERP, персонал, ресурсы и смены', 'Compliance Center и Inspection', 'Cases, сообщения и портал врача', 'Приоритетная поддержка'],
+      },
+      {
+        name: 'Enterprise',
+        desc: 'Для сети клиник или ассоциации с расширенными требованиями.',
+        features: ['Неограниченные клиники и пользователи', 'Расширенные настройки ролей', 'API и интеграции', 'SLA и отдельная среда', 'Персональный менеджер', 'Обучение команды'],
+      },
+    ],
+  },
+  en: {
+    features: [
+      { title: 'Clinic Operations Workspace', desc: 'Appointments, calendar, shifts, staff, equipment, and resources live in one operating workspace for clinic teams.', badge: 'Operations' },
+      { title: 'Compliance Center', desc: 'Licenses, deadlines, inspections, and AI advice help clinics see regulatory risk before it becomes a problem.', badge: 'Risk control' },
+      { title: 'Document Center', desc: 'Contracts, orders, protocols, and referral templates are generated in the selected language and routed for review.', badge: 'AI drafting' },
+      { title: 'Cases & Requests', desc: 'Requests, complaints, and referrals become one trackable workflow with owners and statuses.', badge: 'Workflow' },
+      { title: 'Doctor Portal', desc: 'Doctors get documents, messages, referrals, knowledge, forum access, and career tools without clinic-management noise.', badge: 'Doctor portal' },
+      { title: 'Patient Portal', desc: 'Patients see appointments, messages, vaccinations, QR card, and profile in a simple dedicated portal.', badge: 'Patient portal' },
+      { title: 'AI Advisor', desc: 'Gemini helps with medical-legal questions, draft replies, visit summaries, and inspection readiness.', badge: 'Gemini' },
+      { title: 'Multilingual Workflows', desc: 'Russian by default, plus Uzbek Latin, Uzbek Cyrillic, English, and Karakalpak for teams and patients.', badge: '5 languages' },
+      { title: 'Role-Based Access', desc: 'Admin, clinic, doctor, and patient accounts each receive the right workspace, routes, and data.', badge: 'RBAC' },
+    ],
+    securityFeatures: [
+      { title: 'AES-256 encryption', desc: 'Data is protected in transit and at rest.', badge: 'Security' },
+      { title: 'Daily backups', desc: 'Automated backups help protect operating data.', badge: 'Backup' },
+      { title: 'Audit log', desc: 'Key user actions are recorded for control and investigation.', badge: 'Audit' },
+      { title: 'Role-based access', desc: 'Each role receives only the pages and data it should use.', badge: 'RBAC' },
+      { title: 'Firebase and Google Cloud', desc: 'The platform is built on managed cloud infrastructure.', badge: 'Cloud' },
+      { title: 'Health monitoring', desc: 'Health endpoints and QA checks surface degraded services before launch.', badge: 'Ops' },
+    ],
+    comparison: [
+      { before: 'License and certificate deadlines are tracked manually', after: 'Compliance Center shows deadlines, risks, and required actions' },
+      { before: 'Documents, complaints, and referrals live in separate folders', after: 'Cases and Document Center turn them into clear workflows' },
+      { before: 'Admins, doctors, and patients see the same overloaded app', after: 'Each role gets its own dashboard, navigation, and tasks' },
+      { before: 'Inspection readiness depends on memory and manual checklists', after: 'AI and checklists show clinic readiness in advance' },
+      { before: 'Clinic leaders lack one view of daily operations', after: 'Dashboards show visits, resources, staff, and compliance risk' },
+      { before: 'Teams manually prepare reports and replies', after: 'AI helps draft documents, summaries, and responses faster' },
+    ],
+    plans: [
+      {
+        name: 'Starter',
+        desc: 'For a small clinic starting with documents and deadline control.',
+        features: ['1 clinic workspace', 'AI Advisor up to 100 requests/month', 'Document Center', 'Compliance deadlines', 'Requests module', 'Email support'],
+      },
+      {
+        name: 'Professional',
+        desc: 'For a growing clinic that needs a complete operations system.',
+        features: ['All roles and workspaces', 'Unlimited AI Advisor', 'ERP, staff, resources, and shifts', 'Compliance Center and Inspection', 'Cases, messages, and doctor portal', 'Priority support'],
+      },
+      {
+        name: 'Enterprise',
+        desc: 'For clinic networks or associations with advanced requirements.',
+        features: ['Unlimited clinics and users', 'Advanced role configuration', 'API and integrations', 'SLA and dedicated environment', 'Dedicated manager', 'Team training'],
+      },
+    ],
+  },
+  uz: {
+    features: [
+      { title: 'Klinika operatsion paneli', desc: 'Qabul, kalendar, smenalar, xodimlar, uskunalar va resurslar klinika jamoasi uchun bitta ish maydonida.', badge: 'Operations' },
+      { title: 'Compliance Center', desc: 'Litsenziyalar, muddatlar, tekshiruvlar va AI tavsiyalar klinikaga xavflarni oldindan ko‘rishga yordam beradi.', badge: 'Risk control' },
+      { title: 'Document Center', desc: 'Shartnoma, buyruq, bayonnoma va yo‘llanma shablonlari tanlangan tilda yaratiladi va ko‘rib chiqishga yuboriladi.', badge: 'AI drafting' },
+      { title: 'Cases & Requests', desc: 'Murojaat, shikoyat va yo‘llanmalar mas’ul shaxs va statuslar bilan yagona ish oqimiga aylanadi.', badge: 'Workflow' },
+      { title: 'Shifokor portali', desc: 'Shifokorlar hujjat, xabar, yo‘llanma, bilim bazasi, forum va ish imkoniyatlarini ortiqcha modullarsiz ko‘radi.', badge: 'Doctor portal' },
+      { title: 'Bemor portali', desc: 'Bemorlar qabul, xabarlar, emlashlar, QR karta va profilni sodda alohida kabinetda ko‘radi.', badge: 'Patient portal' },
+      { title: 'AI maslahatchi', desc: 'Gemini tibbiy-huquqiy savollar, javob qoralamalari, tashrif xulosalari va tekshiruv tayyorgarligida yordam beradi.', badge: 'Gemini' },
+      { title: 'Ko‘p tilli ish jarayoni', desc: 'Rus tili standart, shuningdek o‘zbek lotin, o‘zbek kirill, ingliz va qoraqalpoq tillari qo‘llab-quvvatlanadi.', badge: '5 languages' },
+      { title: 'Rolga asoslangan kirish', desc: 'Admin, klinika, shifokor va bemor o‘ziga mos ish maydoni, yo‘nalish va ma’lumotlarni ko‘radi.', badge: 'RBAC' },
+    ],
+    securityFeatures: [
+      { title: 'AES-256 shifrlash', desc: 'Ma’lumotlar uzatishda va saqlashda himoyalanadi.', badge: 'Security' },
+      { title: 'Kunlik zaxira', desc: 'Avtomatik backup operatsion ma’lumotlarni himoya qilishga yordam beradi.', badge: 'Backup' },
+      { title: 'Audit jurnali', desc: 'Muhim foydalanuvchi amallari nazorat uchun qayd etiladi.', badge: 'Audit' },
+      { title: 'Rolga asoslangan kirish', desc: 'Har bir rol faqat o‘ziga kerakli sahifa va ma’lumotlarni oladi.', badge: 'RBAC' },
+      { title: 'Firebase va Google Cloud', desc: 'Platforma boshqariladigan bulut infratuzilmasiga tayangan.', badge: 'Cloud' },
+      { title: 'Holat monitoringi', desc: 'Health endpointlar va QA tekshiruvlar muammolarni ishga tushirishdan oldin ko‘rsatadi.', badge: 'Ops' },
+    ],
+    comparison: [
+      { before: 'Litsenziya va sertifikat muddatlari qo‘lda kuzatiladi', after: 'Compliance Center muddat, xavf va kerakli harakatlarni ko‘rsatadi' },
+      { before: 'Hujjatlar, shikoyatlar va yo‘llanmalar alohida papkalarda', after: 'Cases va Document Center ularni aniq ish oqimiga aylantiradi' },
+      { before: 'Admin, shifokor va bemor bir xil og‘ir tizimni ko‘radi', after: 'Har bir rol o‘z dashboardi, navigatsiyasi va vazifalarini oladi' },
+      { before: 'Tekshiruvga tayyorgarlik xotira va qo‘lda checklistga bog‘liq', after: 'AI va checklistlar klinika tayyorgarligini oldindan ko‘rsatadi' },
+      { before: 'Klinika rahbari kunlik operatsiyani to‘liq ko‘rmaydi', after: 'Dashboard qabul, resurs, xodim va compliance xavfini ko‘rsatadi' },
+      { before: 'Jamoa hisobot va javoblarni qo‘lda tayyorlaydi', after: 'AI hujjat, xulosa va javob qoralamalarini tezlashtiradi' },
+    ],
+    plans: [
+      {
+        name: 'Starter',
+        desc: 'Hujjat va muddat nazoratidan boshlaydigan kichik klinika uchun.',
+        features: ['1 klinika ish maydoni', 'AI maslahatchi oyiga 100 so‘rovgacha', 'Document Center', 'Compliance muddatlari', 'Requests moduli', 'Email qo‘llab-quvvatlash'],
+      },
+      {
+        name: 'Professional',
+        desc: 'To‘liq operatsion tizim kerak bo‘lgan o‘sayotgan klinika uchun.',
+        features: ['Barcha rollar va ish maydonlari', 'Cheksiz AI maslahatchi', 'ERP, xodimlar, resurslar va smenalar', 'Compliance Center va Inspection', 'Cases, xabarlar va shifokor portali', 'Ustuvor qo‘llab-quvvatlash'],
+      },
+      {
+        name: 'Enterprise',
+        desc: 'Klinika tarmoqlari yoki assotsiatsiyalar uchun.',
+        features: ['Cheksiz klinika va foydalanuvchi', 'Kengaytirilgan rol sozlamalari', 'API va integratsiyalar', 'SLA va alohida muhit', 'Shaxsiy menejer', 'Jamoani o‘qitish'],
+      },
+    ],
+  },
+  uz_cyrillic: {
+    features: [
+      { title: 'Клиника операцион панели', desc: 'Қабул, календарь, сменалар, ходимлар, ускуналар ва ресурслар клиника жамоаси учун битта иш майдонида.', badge: 'Operations' },
+      { title: 'Compliance Center', desc: 'Лицензиялар, муддатлар, текширувлар ва AI тавсиялар клиникага хавфларни олдиндан кўришга ёрдам беради.', badge: 'Risk control' },
+      { title: 'Document Center', desc: 'Шартнома, буйруқ, баённома ва йўлланма шаблонлари танланган тилда яратилади ва кўриб чиқишга юборилади.', badge: 'AI drafting' },
+      { title: 'Cases & Requests', desc: 'Мурожаат, шикоят ва йўлланмалар масъул шахс ва статуслар билан ягона иш оқимига айланади.', badge: 'Workflow' },
+      { title: 'Шифокор портали', desc: 'Шифокорлар ҳужжат, хабар, йўлланма, билим базаси, форум ва иш имкониятларини ортиқча модулларсиз кўради.', badge: 'Doctor portal' },
+      { title: 'Бемор портали', desc: 'Беморлар қабул, хабарлар, эмлашлар, QR карта ва профилни содда алоҳида кабинетда кўради.', badge: 'Patient portal' },
+      { title: 'AI маслаҳатчи', desc: 'Gemini тиббий-ҳуқуқий саволлар, жавоб қораламалари, ташриф хулосалари ва текширув тайёргарлигида ёрдам беради.', badge: 'Gemini' },
+      { title: 'Кўп тилли иш жараёни', desc: 'Рус тили стандарт, шунингдек ўзбек лотин, ўзбек кирилл, инглиз ва қорақалпоқ тиллари қўллаб-қувватланади.', badge: '5 languages' },
+      { title: 'Ролга асосланган кириш', desc: 'Админ, клиника, шифокор ва бемор ўзига мос иш майдони, йўналиш ва маълумотларни кўради.', badge: 'RBAC' },
+    ],
+    securityFeatures: [
+      { title: 'AES-256 шифрлаш', desc: 'Маълумотлар узатишда ва сақлашда ҳимояланади.', badge: 'Security' },
+      { title: 'Кунлик захира', desc: 'Автоматик backup операцион маълумотларни ҳимоя қилишга ёрдам беради.', badge: 'Backup' },
+      { title: 'Аудит журнали', desc: 'Муҳим фойдаланувчи амаллари назорат учун қайд этилади.', badge: 'Audit' },
+      { title: 'Ролга асосланган кириш', desc: 'Ҳар бир рол фақат ўзига керакли саҳифа ва маълумотларни олади.', badge: 'RBAC' },
+      { title: 'Firebase ва Google Cloud', desc: 'Платформа бошқариладиган булут инфратузилмасига таянган.', badge: 'Cloud' },
+      { title: 'Ҳолат мониторинги', desc: 'Health endpointлар ва QA текширувлар муаммоларни ишга туширишдан олдин кўрсатади.', badge: 'Ops' },
+    ],
+    comparison: [
+      { before: 'Лицензия ва сертификат муддатлари қўлда кузатилади', after: 'Compliance Center муддат, хавф ва керакли ҳаракатларни кўрсатади' },
+      { before: 'Ҳужжатлар, шикоятлар ва йўлланмалар алоҳида папкаларда', after: 'Cases ва Document Center уларни аниқ иш оқимига айлантиради' },
+      { before: 'Админ, шифокор ва бемор бир хил оғир тизимни кўради', after: 'Ҳар бир рол ўз dashboardи, навигацияси ва вазифаларини олади' },
+      { before: 'Текширувга тайёргарлик хотира ва қўлда checklistга боғлиқ', after: 'AI ва checklistлар клиника тайёргарлигини олдиндан кўрсатади' },
+      { before: 'Клиника раҳбари кунлик операцияни тўлиқ кўрмайди', after: 'Dashboard қабул, ресурс, ходим ва compliance хавфини кўрсатади' },
+      { before: 'Жамоа ҳисобот ва жавобларни қўлда тайёрлайди', after: 'AI ҳужжат, хулоса ва жавоб қораламаларини тезлаштиради' },
+    ],
+    plans: [
+      {
+        name: 'Starter',
+        desc: 'Ҳужжат ва муддат назоратидан бошлайдиган кичик клиника учун.',
+        features: ['1 клиника иш майдони', 'AI маслаҳатчи ойига 100 сўровгача', 'Document Center', 'Compliance муддатлари', 'Requests модули', 'Email қўллаб-қувватлаш'],
+      },
+      {
+        name: 'Professional',
+        desc: 'Тўлиқ операцион тизим керак бўлган ўсаётган клиника учун.',
+        features: ['Барча роллар ва иш майдонлари', 'Чексиз AI маслаҳатчи', 'ERP, ходимлар, ресурслар ва сменалар', 'Compliance Center ва Inspection', 'Cases, хабарлар ва шифокор портали', 'Устувор қўллаб-қувватлаш'],
+      },
+      {
+        name: 'Enterprise',
+        desc: 'Клиника тармоқлари ёки ассоциациялар учун.',
+        features: ['Чексиз клиника ва фойдаланувчи', 'Кенгайтирилган рол созламалари', 'API ва интеграциялар', 'SLA ва алоҳида муҳит', 'Шахсий менежер', 'Жамоани ўқитиш'],
+      },
+    ],
+  },
+  kk: {
+    features: [
+      { title: 'Klinika operaciyalıq paneli', desc: 'Qabıl, kalendar, smenalar, xızmetkerler, úskeneler hám resurslar klinika komandası ushın bir jumıs maydanında.', badge: 'Operations' },
+      { title: 'Compliance Center', desc: 'Licenziyalar, múddetler, tekseriwler hám AI usınıslar klinikaǵa qáwiplerdi aldınan kóriwge járdem beredi.', badge: 'Risk control' },
+      { title: 'Document Center', desc: 'Shártnama, buyrıq, bayannama hám jollanba shablonları tańlanǵan tilde jaratılıp, kórip shıǵıwǵa jiberiledi.', badge: 'AI drafting' },
+      { title: 'Cases & Requests', desc: 'Múrájatlar, shaǵımlar hám jollanbalar juwapker shaxs hám statuslar menen bir jumıs aǵımına aylanadı.', badge: 'Workflow' },
+      { title: 'Shıpaker portalı', desc: 'Shıpakerler hújjet, xabar, jollanba, bilim bazası, forum hám jumıs múmkinshiliklerin artıqsha modullarsız kóredi.', badge: 'Doctor portal' },
+      { title: 'Pacient portalı', desc: 'Pacientler qabıl, xabarlar, vakcinaciyalar, QR karta hám profildi ápiwayı kabinetten kóredi.', badge: 'Patient portal' },
+      { title: 'AI keńesshi', desc: 'Gemini medicinalıq-huqıqıy sorawlar, juwap qaralamaları, vizit juwmaqları hám tekseriwge tayarlıqta járdem beredi.', badge: 'Gemini' },
+      { title: 'Kóp tilli jumıs', desc: 'Rus tili standart, sonıń menen birge ózbek latin, ózbek kirill, ingliz hám qaraqalpaq tilleri qollanıladı.', badge: '5 languages' },
+      { title: 'Rolge baylanıslı kiriw', desc: 'Admin, klinika, shıpaker hám pacient ózine tiyisli jumıs maydanı, marshrut hám maǵlıwmatlardı kóredi.', badge: 'RBAC' },
+    ],
+    securityFeatures: [
+      { title: 'AES-256 shifrlaw', desc: 'Maǵlıwmatlar uzatıwda hám saqlawda qorǵaladı.', badge: 'Security' },
+      { title: 'Kúnlik backup', desc: 'Avtomatik backup operaciyalıq maǵlıwmatlardı qorǵawǵa járdem beredi.', badge: 'Backup' },
+      { title: 'Audit jurnalı', desc: 'Áhmiyetli paydalanıwshı háreketleri baqlaw ushın jazıladı.', badge: 'Audit' },
+      { title: 'Rolge baylanıslı kiriw', desc: 'Hár bir rol tek ózine kerekli betler hám maǵlıwmatlardı aladı.', badge: 'RBAC' },
+      { title: 'Firebase hám Google Cloud', desc: 'Platforma basqarılatuǵın cloud infrastrukturasına súyenedi.', badge: 'Cloud' },
+      { title: 'Jaǵday monitoringi', desc: 'Health endpointler hám QA tekseriwler mashqalalardı iske túsiriwden aldın kórsetedi.', badge: 'Ops' },
+    ],
+    comparison: [
+      { before: 'Licenziya hám sertifikat múddetleri qol menen baqlanadı', after: 'Compliance Center múddet, qáwip hám kerekli háreketlerdi kórsetedi' },
+      { before: 'Hújjetler, shaǵımlar hám jollanbalar bólek papkalarda', after: 'Cases hám Document Center olardı anıq jumıs aǵımına aylandıradı' },
+      { before: 'Admin, shıpaker hám pacient birdey awır sistemanı kóredi', after: 'Hár bir rol óz dashboardı, navigaciyası hám wazıypaların aladı' },
+      { before: 'Tekseriwge tayarlıq yad hám qol checklistke baylanıslı', after: 'AI hám checklistler klinika tayarlıǵın aldınan kórsetedi' },
+      { before: 'Klinika basshısı kúnlik operaciyanı tolıq kórmeydi', after: 'Dashboard qabıl, resurs, xızmetker hám compliance qáwipin kórsetedi' },
+      { before: 'Komanda esabat hám juwaplardı qol menen tayarlaydı', after: 'AI hújjet, juwmaq hám juwap qaralamaların tezletedi' },
+    ],
+    plans: [
+      {
+        name: 'Starter',
+        desc: 'Hújjet hám múddet baqlawdan baslaytuǵın kishi klinika ushın.',
+        features: ['1 klinika jumıs maydanı', 'AI keńesshi ayına 100 sorawǵa shekem', 'Document Center', 'Compliance múddetleri', 'Requests moduli', 'Email qollap-quwatlaw'],
+      },
+      {
+        name: 'Professional',
+        desc: 'Tolıq operaciyalıq sistema kerek bolǵan ósip atırǵan klinika ushın.',
+        features: ['Barlıq roller hám jumıs maydanları', 'Sheksiz AI keńesshi', 'ERP, xızmetkerler, resurslar hám smenalar', 'Compliance Center hám Inspection', 'Cases, xabarlar hám shıpaker portalı', 'Ústin qollap-quwatlaw'],
+      },
+      {
+        name: 'Enterprise',
+        desc: 'Klinika tarmaqları yaki associaciyalar ushın.',
+        features: ['Sheksiz klinika hám paydalanıwshı', 'Keńeytilgen rol sazlamaları', 'API hám integraciyalar', 'SLA hám bólek orta', 'Jeke menedjer', 'Komandanı oqıtıw'],
+      },
+    ],
+  },
+};
+
+function getMarketingCopy(lang: Language) {
+  return LANDING_MARKETING_COPY[lang] ?? LANDING_MARKETING_COPY.ru;
+}
 
 function SplineViewer({ src }: { src: string }) {
   const [mounted, setMounted] = useState(false);
@@ -370,18 +627,24 @@ function Stats() {
 
 // ─── Features ─────────────────────────────────────────────────────────────────
 function Features() {
-  const { t } = useLanguage();
-  const features = [
-    { icon: <Bot className="h-6 w-6" />, color: 'bg-cyan-600', title: t.nav.aiAdvisor, desc: "SanQvaN, SSV buyruqlari, tibbiy protokollar bo'yicha Gemini 2.0 Flash asosidagi suhbatli maslahat.", badge: 'Gemini 2.0' },
-    { icon: <Video className="h-6 w-6" />, color: 'bg-blue-600', title: "Telemeditsina", desc: "Bemorlar bilan masofaviy video konsultatsiyalar va xavfsiz tibbiy chat tizimi.", badge: 'WebRTC' },
-    { icon: <ShieldCheck className="h-6 w-6" />, color: 'bg-rose-600', title: t.nav.inspection, desc: "Sanitariya, litsenziya, hujjatchilik va xodimlar bo'yicha tekshiruv ro'yxati. AI xavf baholash.", badge: 'Risk scoring' },
-    { icon: <Database className="h-6 w-6" />, color: 'bg-indigo-600', title: t.nav.erp, desc: "Bemor tashriflari, tashxis, retseptlar, protseduralar, tozalash jurnali va BI analitika.", badge: 'Full ERP' },
-    { icon: <Stethoscope className="h-6 w-6" />, color: 'bg-emerald-600', title: "E-Retsept", desc: "Elektron retseptlarni generatsiya qilish va hamkor dorixonalar bilan raqamli integratsiya.", badge: 'E-Rx' },
-    { icon: <Microscope className="h-6 w-6" />, color: 'bg-violet-600', title: "Laboratoriya", desc: "Diagnostika natijalarini to'g'ridan-to'g'ri bemorning elektron hisob varaqasiga (EMR) yuklash.", badge: 'LIS/PACS' },
-    { icon: <FileText className="h-6 w-6" />, color: 'bg-teal-600', title: t.nav.documents, desc: "Mehnat shartnomasi, buyruq, bayonnoma, yo'llanmalarni AI yordamida avto-tuzish.", badge: 'AI drafting' },
-    { icon: <Search className="h-6 w-6" />, color: 'bg-amber-600', title: "Kadrlar Markazi", desc: "Klinikalar uchun bo'sh ish o'rinlari e'lon qilish va tibbiy mutaxassislarni tezkor yollash.", badge: 'Recruitment' },
-    { icon: <MessageSquare className="h-6 w-6" />, color: 'bg-fuchsia-600', title: "Forum va LMS", desc: "Shifokorlar o'rtasida professional tajriba almashish, uzluksiz ta'lim (CME) va jurnallar.", badge: 'Community' },
+  const { t, lang } = useLanguage();
+  const icons = [
+    <Database key="operations" className="h-6 w-6" />,
+    <ShieldCheck key="compliance" className="h-6 w-6" />,
+    <FileText key="documents" className="h-6 w-6" />,
+    <MessageSquare key="cases" className="h-6 w-6" />,
+    <Stethoscope key="doctor" className="h-6 w-6" />,
+    <Users key="patient" className="h-6 w-6" />,
+    <Bot key="ai" className="h-6 w-6" />,
+    <Globe key="language" className="h-6 w-6" />,
+    <Lock key="roles" className="h-6 w-6" />,
   ];
+  const colors = ['bg-cyan-600', 'bg-rose-600', 'bg-teal-600', 'bg-blue-600', 'bg-emerald-600', 'bg-violet-600', 'bg-indigo-600', 'bg-amber-600', 'bg-slate-800'];
+  const features = getMarketingCopy(lang).features.map((feature, index) => ({
+    ...feature,
+    icon: icons[index],
+    color: colors[index],
+  }));
   return (
     <section id="features" className="py-14 sm:py-24 bg-slate-50">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -459,15 +722,27 @@ function HowItWorks() {
 
 // ─── Security Section (NEW) ────────────────────────────────────────────────────
 function SecuritySection() {
-  const { t } = useLanguage();
-  const features = [
-    { icon: <Shield className="h-6 w-6 text-cyan-600" />, title: 'AES-256', desc: 'Barcha ma\'lumotlar saqlash va uzatishda shifrlangan' },
-    { icon: <RefreshCw className="h-6 w-6 text-emerald-600" />, title: 'Kunlik backup', desc: 'Avtomatik zaxira nusxalar, 30 kun saqlanadi' },
-    { icon: <ClipboardCheck className="h-6 w-6 text-blue-600" />, title: 'Audit jurnali', desc: 'Barcha amallar to\'liq qayd etiladi va kuzatiladi' },
-    { icon: <Eye className="h-6 w-6 text-violet-600" />, title: 'Rol asosidagi kirish', desc: 'Har bir foydalanuvchi faqat o\'z ma\'lumotlarini ko\'radi' },
+  const { t, lang } = useLanguage();
+  const icons = [
+    <Shield key="encryption" className="h-6 w-6 text-cyan-600" />,
+    <RefreshCw key="backup" className="h-6 w-6 text-emerald-600" />,
+    <ClipboardCheck key="audit" className="h-6 w-6 text-blue-600" />,
+    <Eye key="roles" className="h-6 w-6 text-violet-600" />,
     { icon: <Server className="h-6 w-6 text-rose-600" />, title: 'GCP Infratuzilma', desc: 'Google Cloud — dunyo miqyosida 99.99% uptime kafolati' },
     { icon: <Lock className="h-6 w-6 text-amber-600" />, title: '24/7 Monitoring', desc: 'Real-vaqtda tizim holati nazorati va ogohlantirish' },
   ];
+  const features = getMarketingCopy(lang).securityFeatures.map((feature, index) => {
+    const iconCandidate = icons[index] as { icon?: ReactNode } | ReactNode;
+    let icon: ReactNode = iconCandidate as ReactNode;
+    if (typeof iconCandidate === 'object' && iconCandidate !== null && 'icon' in iconCandidate) {
+      icon = (iconCandidate as { icon?: ReactNode }).icon;
+    }
+    return {
+      ...feature,
+      icon,
+    };
+  });
+
   return (
     <section className="py-14 sm:py-24 bg-slate-900">
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
@@ -583,8 +858,10 @@ function Testimonials() {
 
 // ─── Comparison Section (NEW) ──────────────────────────────────────────────────
 function Comparison() {
-  const { t } = useLanguage();
-  const items = [
+  const { t, lang } = useLanguage();
+  const items = getMarketingCopy(lang).comparison;
+  /*
+  const oldItems = [
     { before: "Qog'oz hujjatlar — yo'qolish xavfi", after: "Bulut asosida xavfsiz saqlash" },
     { before: "Muddatlarni qo'lda kuzatish", after: "Avtomatik eslatma va nazorat" },
     { before: "Tekshiruvga tayyorgarlik — haftalik ish", after: "Har doim tayyor, real-vaqt AI baholash" },
@@ -592,6 +869,7 @@ function Comparison() {
     { before: "Bemor ma'lumotlari tarqoq", after: "Yagona ERP tizimida barcha ma'lumot" },
     { before: "Hisobotlar Excel-da qo'lda", after: "Bir tugma — avtomatik analitika" },
   ];
+  */
   return (
     <section className="py-14 sm:py-24 bg-slate-50">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 lg:px-8">
@@ -641,57 +919,33 @@ function Comparison() {
 
 // ─── Pricing (enhanced with monthly/yearly toggle) ────────────────────────────
 function Pricing() {
-  const { t } = useLanguage();
+  const { t, lang } = useLanguage();
   const [yearly, setYearly] = useState(false);
+  const planCopy = getMarketingCopy(lang).plans;
 
   const plans = [
     {
-      name: 'Starter',
+      name: planCopy[0].name,
       priceMonthly: '590,000',
       priceYearly: '4,920,000',
-      desc: "Kichik klinikalar uchun",
-      features: [
-        "1 klinika hisobi",
-        "AI Maslahatchi (100 so'rov/oy)",
-        "Hujjat boshqaruvi",
-        "Muddatlar nazorati",
-        "Murojaatlar moduli",
-        "Email qo'llab-quvvatlash",
-      ],
+      desc: planCopy[0].desc,
+      features: planCopy[0].features,
       cta: t.landing.pricing.getStarted, highlighted: false,
     },
     {
-      name: 'Professional',
+      name: planCopy[1].name,
       priceMonthly: '1,290,000',
       priceYearly: '10,750,000',
-      desc: "O'sib borayotgan klinikalar uchun",
-      features: [
-        "Cheksiz klinika hisoblar",
-        "AI Maslahatchi (cheksiz)",
-        "Barcha 6 modul to'liq",
-        "ERP tizimi + analitika",
-        "Anti-tekshiruv moduli",
-        "Telemeditsina va e-retsept",
-        "Yangiliklar, forum, ish e'lonlari",
-        "Ustuvor qo'llab-quvvatlash",
-      ],
+      desc: planCopy[1].desc,
+      features: planCopy[1].features,
       cta: t.landing.pricing.mostPopular, highlighted: true,
     },
     {
-      name: 'Enterprise',
+      name: planCopy[2].name,
       priceMonthly: t.landing.pricing.contact,
       priceYearly: t.landing.pricing.contact,
-      desc: "Klinikalar assotsiatsiyasi uchun",
-      features: [
-        "Cheksiz hamma narsa",
-        "Maxsus AI sozlamalar",
-        "API integratsiya",
-        "Dedicated server",
-        "SLA kafolati 99.9%",
-        "Shaxsiy menejer",
-        "Onsite o'quv treningi",
-        "White-label imkoniyati",
-      ],
+      desc: planCopy[2].desc,
+      features: planCopy[2].features,
       cta: t.landing.pricing.contact, highlighted: false,
     },
   ];

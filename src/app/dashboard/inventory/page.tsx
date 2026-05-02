@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getInventory, createInventoryItem, updateInventoryItem, deleteInventoryItem } from '@/lib/firestore';
+import { useRouter } from 'next/navigation';
 import type { InventoryItem } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,10 +20,27 @@ const CATEGORIES: { key: InventoryItem['category']; label: string; color: string
 
 const EMPTY = { name: '', category: 'medicine' as InventoryItem['category'], unit: 'dona', quantity: '', minQuantity: '', expiryDate: '', supplier: '', price: '' };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function InventoryPage() {
-  const { user, userRole } = useAuth();
+  const { user, userRole, loading } = useAuth();
+  const router = useRouter();
   const [items, setItems] = useState<InventoryItem[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState<string>('all');
   const [showForm, setShowForm] = useState(false);
@@ -33,27 +50,44 @@ export default function InventoryPage() {
 
   const canEdit = userRole === 'clinic' || userRole === 'admin';
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
-    try { setItems(await getInventory(user.uid)); }
+    setDataLoading(true);
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ items: InventoryItem[] }>('/api/inventory', token);
+      setItems(data.items);
+    }
     catch { toast.error('Yuklashda xato'); }
-    finally { setLoading(false); }
-  }
+    finally { setDataLoading(false); }
+  }, [user]);
 
-  useEffect(() => { load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
 
   async function handleSave() {
     if (!form.name || !form.quantity) { toast.error('Nom va miqdor majburiy'); return; }
+    if (!user) return;
     setSaving(true);
     try {
-      const now = new Date().toISOString();
-      const data = { ...form, quantity: Number(form.quantity), minQuantity: Number(form.minQuantity) || 0, price: form.price ? Number(form.price) : undefined, expiryDate: form.expiryDate || undefined, supplier: form.supplier || undefined, updatedAt: now };
+      const token = await user.getIdToken();
+      const data = { ...form, quantity: Number(form.quantity), minQuantity: Number(form.minQuantity) || 0, price: form.price ? Number(form.price) : undefined, expiryDate: form.expiryDate || undefined, supplier: form.supplier || undefined };
       if (editId) {
-        await updateInventoryItem(editId, data);
+        await requestJson<InventoryItem>('/api/inventory', token, {
+          method: 'PATCH',
+          body: JSON.stringify({ id: editId, ...data }),
+        });
         toast.success('Yangilandi');
       } else {
-        await createInventoryItem({ ...data, clinicId: user!.uid, createdAt: now });
+        await requestJson<InventoryItem>('/api/inventory', token, {
+          method: 'POST',
+          body: JSON.stringify(data),
+        });
         toast.success('Qo\'shildi');
       }
       setShowForm(false); setEditId(null); setForm(EMPTY); await load();
@@ -67,6 +101,20 @@ export default function InventoryPage() {
     setShowForm(true);
   }
 
+  async function handleDelete(id: string) {
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/inventory', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
+      await load();
+    } catch {
+      toast.error('O\'chirishda xato');
+    }
+  }
+
   const filtered = items.filter((i) => {
     const mc = filterCat === 'all' || i.category === filterCat;
     const ms = !search || i.name.toLowerCase().includes(search.toLowerCase()) || (i.supplier ?? '').toLowerCase().includes(search.toLowerCase());
@@ -78,6 +126,8 @@ export default function InventoryPage() {
     if (!i.expiryDate) return false;
     return (new Date(i.expiryDate).getTime() - Date.now()) / 86400000 <= 30;
   }).length;
+
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
 
   return (
     <div className="space-y-5">
@@ -138,13 +188,13 @@ export default function InventoryPage() {
         </div>
       </div>
 
-      {loading && <div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}</div>}
+      {dataLoading &&<div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-16 w-full rounded-xl" />)}</div>}
 
-      {!loading && filtered.length === 0 && (
+      {!dataLoading &&filtered.length === 0 && (
         <div className="text-center py-16 bg-white rounded-xl border border-dashed"><Package className="w-12 h-12 mx-auto mb-3 text-slate-200" /><p className="text-slate-500">Inventar topilmadi</p></div>
       )}
 
-      {!loading && filtered.length > 0 && (
+      {!dataLoading &&filtered.length > 0 && (
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[560px]">
             <thead><tr className="border-b bg-slate-50/50">
@@ -186,7 +236,7 @@ export default function InventoryPage() {
                       <td className="px-3 py-2.5">
                         <div className="flex gap-1">
                           <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-blue-600" onClick={() => startEdit(item)}><Pencil className="w-3.5 h-3.5" /></Button>
-                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-red-600" onClick={() => deleteInventoryItem(item.id).then(load)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                          <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-slate-400 hover:text-red-600" onClick={() => handleDelete(item.id)}><Trash2 className="w-3.5 h-3.5" /></Button>
                         </div>
                       </td>
                     )}

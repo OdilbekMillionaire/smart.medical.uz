@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getComplaintsByClinic, getAllComplaints, createComplaint, updateComplaintStatus } from '@/lib/firestore';
+import { useRouter } from 'next/navigation';
 import type { Complaint } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -34,10 +34,27 @@ const CATEGORIES: { key: Complaint['category']; label: string }[] = [
 
 const EMPTY = { complainantName: '', complainantPhone: '', subject: '', description: '', category: 'service' as Complaint['category'], priority: 'medium' as Complaint['priority'] };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function ComplaintsPage() {
-  const { user, userRole } = useAuth();
+  const { user, userRole, loading } = useAuth();
+  const router = useRouter();
   const [complaints, setComplaints] = useState<Complaint[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [showForm, setShowForm] = useState(false);
@@ -46,25 +63,36 @@ export default function ComplaintsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [resolution, setResolution] = useState('');
 
-  const isAdmin = userRole === 'admin';
+  const canManage = userRole === 'admin' || userRole === 'clinic';
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
+    setDataLoading(true);
     try {
-      const data = isAdmin ? await getAllComplaints() : await getComplaintsByClinic(user.uid);
-      setComplaints(data);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ complaints: Complaint[] }>('/api/complaints', token);
+      setComplaints(data.complaints);
     } catch { toast.error('Yuklashda xato'); }
-    finally { setLoading(false); }
-  }
+    finally { setDataLoading(false); }
+  }, [user]);
 
-  useEffect(() => { load(); }, [user, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
 
   async function handleCreate() {
     if (!user || !form.complainantName || !form.subject || !form.description) { toast.error('Majburiy maydonlarni to\'ldiring'); return; }
     setSaving(true);
     try {
-      await createComplaint({ ...form, clinicId: user.uid, status: 'open', createdAt: new Date().toISOString() });
+      const token = await user.getIdToken();
+      await requestJson<Complaint>('/api/complaints', token, {
+        method: 'POST',
+        body: JSON.stringify(form),
+      });
       toast.success('Shikoyat qo\'shildi');
       setShowForm(false); setForm(EMPTY); await load();
     } catch { toast.error('Saqlashda xato'); }
@@ -73,14 +101,28 @@ export default function ComplaintsPage() {
 
   async function handleResolve(id: string) {
     try {
-      await updateComplaintStatus(id, 'resolved', resolution);
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<Complaint>('/api/complaints', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id, status: 'resolved', resolution }),
+      });
       toast.success('Hal qilindi deb belgilandi');
       setSelectedId(null); setResolution(''); await load();
     } catch { toast.error('Yangilashda xato'); }
   }
 
   async function quickStatus(id: string, status: Complaint['status']) {
-    try { await updateComplaintStatus(id, status); toast.success('Yangilandi'); await load(); }
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<Complaint>('/api/complaints', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id, status }),
+      });
+      toast.success('Yangilandi');
+      await load();
+    }
     catch { toast.error('Xato'); }
   }
 
@@ -93,6 +135,8 @@ export default function ComplaintsPage() {
   const openCount = complaints.filter((c) => c.status === 'open').length;
   const investigatingCount = complaints.filter((c) => c.status === 'investigating').length;
 
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
+
   return (
     <div className="space-y-5">
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -100,7 +144,7 @@ export default function ComplaintsPage() {
           <h1 className="text-2xl font-bold flex items-center gap-2"><AlertCircle className="w-6 h-6 text-red-500" />Shikoyatlar Boshqaruvi</h1>
           <p className="text-sm text-muted-foreground mt-1">Bemor va xodim shikoyatlarini kuzatish</p>
         </div>
-        <Button onClick={() => setShowForm(!showForm)} className="gap-2 shrink-0"><Plus className="w-4 h-4" />Shikoyat qo&apos;shish</Button>
+        {canManage && <Button onClick={() => setShowForm(!showForm)} className="gap-2 shrink-0"><Plus className="w-4 h-4" />Shikoyat qo&apos;shish</Button>}
       </div>
 
       {/* Stats */}
@@ -119,7 +163,7 @@ export default function ComplaintsPage() {
       )}
 
       {/* Form */}
-      {showForm && (
+      {showForm && canManage && (
         <Card className="border-red-200 bg-red-50/10">
           <CardHeader className="pb-3"><CardTitle className="text-sm">Yangi shikoyat qo&apos;shish</CardTitle></CardHeader>
           <CardContent className="space-y-3">
@@ -169,13 +213,13 @@ export default function ComplaintsPage() {
         </div>
       </div>
 
-      {loading && <div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>}
+      {dataLoading &&<div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-24 w-full rounded-xl" />)}</div>}
 
-      {!loading && filtered.length === 0 && (
+      {!dataLoading &&filtered.length === 0 && (
         <div className="text-center py-16 bg-white rounded-xl border border-dashed"><MessageSquare className="w-12 h-12 mx-auto mb-3 text-slate-200" /><p className="text-slate-500">Shikoyatlar topilmadi</p></div>
       )}
 
-      {!loading && filtered.length > 0 && (
+      {!dataLoading &&filtered.length > 0 && (
         <div className="space-y-3">
           {filtered.map((c) => {
             const sm = STATUS_META[c.status]; const pm = PRIORITY_META[c.priority];

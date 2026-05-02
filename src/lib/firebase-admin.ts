@@ -1,4 +1,5 @@
-import { initializeApp, getApps, cert, App } from 'firebase-admin/app';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import type { App, ServiceAccount } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { getFirestore } from 'firebase-admin/firestore';
 
@@ -14,11 +15,22 @@ function getAdminApp(): App {
     throw new Error('FIREBASE_ADMIN_SDK_KEY environment variable is not set');
   }
 
-  const serviceAccount = JSON.parse(serviceAccountKey);
+  // Support both raw JSON and base64-encoded JSON (some deployment platforms encode it)
+  let serviceAccount: ServiceAccount;
+  try {
+    serviceAccount = JSON.parse(serviceAccountKey);
+  } catch {
+    const decoded = Buffer.from(serviceAccountKey, 'base64').toString('utf-8');
+    serviceAccount = JSON.parse(decoded);
+  }
+  const serviceAccountProjectId = (serviceAccount as ServiceAccount & { project_id?: string }).project_id ?? serviceAccount.projectId;
 
   adminApp = initializeApp({
     credential: cert(serviceAccount),
-    projectId: process.env.GOOGLE_CLOUD_PROJECT_ID,
+    projectId:
+      serviceAccountProjectId ??
+      process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ??
+      process.env.GOOGLE_CLOUD_PROJECT_ID,
   });
 
   return adminApp;

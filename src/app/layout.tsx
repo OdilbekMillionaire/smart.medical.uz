@@ -1,20 +1,7 @@
 import type { Metadata } from 'next';
 import { Inter } from 'next/font/google';
 import './globals.css';
-import dynamic from 'next/dynamic';
-import { Toaster } from 'sonner';
-
-
-// Load providers client-side only — Firebase must never run on the server
-const AuthProvider = dynamic(
-  () => import('@/contexts/AuthContext').then((m) => m.AuthProvider),
-  { ssr: false }
-);
-
-const LanguageProvider = dynamic(
-  () => import('@/contexts/LanguageContext').then((m) => m.LanguageProvider),
-  { ssr: false }
-);
+import { AppProviders } from '@/components/shared/AppProviders';
 
 const inter = Inter({
   subsets: ['latin', 'cyrillic'],
@@ -33,13 +20,24 @@ export default function RootLayout({
 }) {
   return (
     <html lang="uz" suppressHydrationWarning>
+      <head>
+        {/* Apply saved theme before React hydrates — prevents flash */}
+        <script dangerouslySetInnerHTML={{ __html: `
+(function(){
+  try {
+    var t = localStorage.getItem('sma_theme');
+    if (t === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+      if (!t) localStorage.setItem('sma_theme', 'light');
+    }
+  } catch(e){}
+})();
+        ` }} />
+      </head>
       <body className={`${inter.variable} font-sans antialiased bg-slate-50 text-slate-900`}>
-          <LanguageProvider>
-            <AuthProvider>
-              {children}
-              <Toaster position="top-right" richColors />
-            </AuthProvider>
-          </LanguageProvider>
+        <AppProviders>{children}</AppProviders>
       </body>
     </html>
   );

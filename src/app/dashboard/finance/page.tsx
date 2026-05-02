@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 import { getERPByClinic } from '@/lib/firestore';
 import type { ERPRecord } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -27,10 +28,11 @@ const INCOME_CATEGORIES = ['Konsultatsiya', 'Protsedura', 'Laboratoriya', 'Tibbi
 const MONTH_NAMES = ['Yan', 'Fev', 'Mar', 'Apr', 'May', 'Iyun', 'Iyul', 'Avg', 'Sen', 'Okt', 'Noy', 'Dek'];
 
 export default function FinancePage() {
-  const { user, userRole } = useAuth();
+  const { user, userRole, loading } = useAuth();
+  const router = useRouter();
   const [erpRecords, setErpRecords] = useState<ERPRecord[]>([]);
   const [entries, setEntries] = useState<FinanceEntry[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({ type: 'income' as 'income' | 'expense', category: 'Konsultatsiya', amount: '', date: new Date().toISOString().split('T')[0], description: '' });
   const [filterMonth, setFilterMonth] = useState(new Date().toISOString().slice(0, 7));
@@ -38,8 +40,14 @@ export default function FinancePage() {
   const canEdit = userRole === 'clinic' || userRole === 'admin';
 
   useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
+
+  useEffect(() => {
     if (!user) return;
-    setLoading(true);
+    setDataLoading(true);
     getERPByClinic(user.uid)
       .then((data) => {
         setErpRecords(data);
@@ -49,7 +57,7 @@ export default function FinancePage() {
         setEntries(stored ? JSON.parse(stored) : []);
       })
       .catch(() => toast.error('Yuklashda xato'))
-      .finally(() => setLoading(false));
+      .finally(() => setDataLoading(false));
   }, [user]);
 
   function saveEntries(newEntries: FinanceEntry[]) {
@@ -95,6 +103,8 @@ export default function FinancePage() {
     const a = document.createElement('a'); a.href = url; a.download = `moliya-${filterMonth}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
+
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
 
   return (
     <div className="space-y-5">
@@ -187,7 +197,7 @@ export default function FinancePage() {
       )}
 
       {/* Transactions */}
-      {loading ? <div className="space-y-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-12 w-full rounded" />)}</div> : (
+      {dataLoading ? <div className="space-y-2">{[1,2,3].map((i) => <Skeleton key={i} className="h-12 w-full rounded" />)}</div> : (
         <Card>
           <CardHeader className="py-3 px-4 border-b bg-slate-50"><CardTitle className="text-sm">{filterMonth} — Yozuvlar ({filtered.length})</CardTitle></CardHeader>
           {filtered.length === 0 ? (

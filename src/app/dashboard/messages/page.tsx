@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { getMessagesByUser, getSentMessagesByUser, sendMessage, markMessageRead, getAllUsers } from '@/lib/firestore';
 import type { Message, BaseUser } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -22,8 +21,24 @@ const DATE_LOCALE: Record<string, string> = {
 
 type Tab = 'inbox' | 'sent' | 'compose';
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function MessagesPage() {
-  const { user, userProfile } = useAuth();
+  const { user } = useAuth();
   const { t, lang } = useLanguage();
   const [tab, setTab] = useState<Tab>('inbox');
   const [inbox, setInbox] = useState<Message[]>([]);
@@ -35,28 +50,32 @@ export default function MessagesPage() {
   const [sending, setSending] = useState(false);
   const locale = DATE_LOCALE[lang] || 'uz-UZ';
 
-  async function load() {
-    if (!user) return;
+  const load = useCallback(async () => {
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
-      const [inboxData, sentData, allUsers] = await Promise.all([
-        getMessagesByUser(user.uid),
-        getSentMessagesByUser(user.uid),
-        getAllUsers(),
-      ]);
-      setInbox(inboxData);
-      setSent(sentData);
-      setUsers(allUsers.filter((u) => u.uid !== user.uid) as BaseUser[]);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ inbox: Message[]; sent: Message[]; users: BaseUser[] }>('/api/messages', token);
+      setInbox(data.inbox);
+      setSent(data.sent);
+      setUsers(data.users);
     } catch { toast.error(t.messages.loadError); }
     finally { setLoading(false); }
-  }
+  }, [t.messages.loadError, user]);
 
-  useEffect(() => { load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   async function handleSelect(msg: Message) {
     setSelected(msg);
     if (!msg.read && msg.toUserId === user?.uid) {
-      await markMessageRead(msg.id);
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/messages', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id: msg.id }),
+      });
       setInbox((prev) => prev.map((m) => m.id === msg.id ? { ...m, read: true } : m));
     }
   }
@@ -65,16 +84,14 @@ export default function MessagesPage() {
     if (!user || !form.toUserId || !form.subject || !form.body) { toast.error(t.messages.fillAll); return; }
     setSending(true);
     try {
-      const toUser = users.find((u) => u.uid === form.toUserId);
-      await sendMessage({
-        fromUserId: user.uid,
-        fromName: userProfile?.displayName ?? user.email ?? '',
+      const token = await user.getIdToken();
+      await requestJson<Message>('/api/messages', token, {
+        method: 'POST',
+        body: JSON.stringify({
         toUserId: form.toUserId,
-        toName: toUser?.displayName ?? toUser?.email ?? '',
         subject: form.subject,
         body: form.body,
-        read: false,
-        createdAt: new Date().toISOString(),
+      }),
       });
       toast.success(t.messages.sendSuccess);
       setForm({ toUserId: '', subject: '', body: '' });

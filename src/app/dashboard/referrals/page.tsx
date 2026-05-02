@@ -1,8 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getReferralsByClinic, createReferral, updateReferralStatus } from '@/lib/firestore';
 import type { Referral } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -25,6 +24,22 @@ const STATUS_META: Record<Referral['status'], { label: string; color: string }> 
 
 const EMPTY = { toClinicName: '', patientName: '', patientDob: '', diagnosis: '', urgency: 'routine' as Referral['urgency'], doctorName: '', notes: '' };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function ReferralsPage() {
   const { user, userRole, userProfile } = useAuth();
   const [referrals, setReferrals] = useState<Referral[]>([]);
@@ -36,15 +51,19 @@ export default function ReferralsPage() {
 
   const canCreate = userRole === 'clinic' || userRole === 'admin' || userRole === 'doctor';
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
-    try { setReferrals(await getReferralsByClinic(user.uid)); }
+    try {
+      const token = await user.getIdToken();
+      const data = await requestJson<{ referrals: Referral[] }>('/api/referrals', token);
+      setReferrals(data.referrals);
+    }
     catch { toast.error('Yuklashda xato'); }
     finally { setLoading(false); }
-  }
+  }, [user]);
 
-  useEffect(() => { load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   async function handleCreate() {
     if (!user || !form.toClinicName || !form.patientName || !form.diagnosis || !form.doctorName) {
@@ -53,10 +72,15 @@ export default function ReferralsPage() {
     setSaving(true);
     try {
       const clinicName = (userProfile as { clinicName?: string })?.clinicName ?? (userProfile as { fullName?: string })?.fullName ?? 'Klinika';
-      await createReferral({
-        fromClinicId: user.uid, fromClinicName: clinicName,
-        ...form, patientDob: form.patientDob || undefined, notes: form.notes || undefined,
-        status: 'sent', createdAt: new Date().toISOString(),
+      const token = await user.getIdToken();
+      await requestJson<Referral>('/api/referrals', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          fromClinicName: clinicName,
+          ...form,
+          patientDob: form.patientDob || undefined,
+          notes: form.notes || undefined,
+        }),
       });
       toast.success('Yo\'llanma yuborildi');
       setShowForm(false); setForm(EMPTY); await load();
@@ -65,7 +89,16 @@ export default function ReferralsPage() {
   }
 
   async function handleStatus(id: string, status: Referral['status']) {
-    try { await updateReferralStatus(id, status); toast.success('Yangilandi'); await load(); }
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<Referral>('/api/referrals', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id, status }),
+      });
+      toast.success('Yangilandi');
+      await load();
+    }
     catch { toast.error('Xato'); }
   }
 

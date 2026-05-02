@@ -1,25 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin';
+import { getAdminDb } from '@/lib/firebase-admin';
 import { generateText, REPLY_DRAFT_PROMPT } from '@/lib/vertex-ai';
-import type { Request, UserRole } from '@/types';
+import { isApiError, parseJson, requireApiUser } from '@/lib/api-auth';
+import { compactObject, createServerNotification, writeAuditLog } from '@/lib/server-events';
+import { z } from 'zod';
+import type { Request } from '@/types';
+
+type RouteContext = { params: Promise<{ id: string }> };
+
+const UpdateRequestSchema = z.object({
+  status: z.enum(['received', 'in_review', 'replied', 'closed']).optional(),
+  assignedTo: z.string().trim().max(128).optional(),
+  draftReplyId: z.string().max(50000).optional(),
+  generateDraftReply: z.boolean().optional(),
+});
+
+function canAccessRequest(user: { uid: string; role: string }, request: Request): boolean {
+  return user.role === 'admin' || request.fromUserId === user.uid || request.toClinicId === user.uid;
+}
 
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: RouteContext
 ) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    const decoded = await getAdminAuth().verifyIdToken(token);
+    const { id } = await params;
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
     const db = getAdminDb();
-    const snap = await db.collection('requests').doc(params.id).get();
+    const snap = await db.collection('requests').doc(id).get();
     if (!snap.exists) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const request = { id: snap.id, ...snap.data() } as Request;
-    const role = decoded.role as UserRole;
-    if (role !== 'admin' && request.fromUserId !== decoded.uid) {
+    if (!canAccessRequest(auth, request)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
     return NextResponse.json(request);
@@ -31,28 +43,27 @@ export async function GET(
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: RouteContext
 ) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    const role = decoded.role as UserRole;
+    const { id } = await params;
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
     const db = getAdminDb();
 
-    const snap = await db.collection('requests').doc(params.id).get();
+    const snap = await db.collection('requests').doc(id).get();
     if (!snap.exists) return NextResponse.json({ error: 'Not found' }, { status: 404 });
     const existing = snap.data() as Request;
 
-    // Only admin can update status/reply
-    if (role !== 'admin' && existing.fromUserId !== decoded.uid) {
+    if (!canAccessRequest(auth, existing)) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
+    if (auth.role !== 'admin' && existing.toClinicId !== auth.uid) {
+      return NextResponse.json({ error: 'Only recipient clinic or admin can update requests' }, { status: 403 });
+    }
 
-    const body = await req.json() as Partial<Request> & { generateDraftReply?: boolean };
+    const body = await parseJson(req, UpdateRequestSchema);
+    if (body instanceof NextResponse) return body;
 
     let draftReply: string | undefined;
     if (body.generateDraftReply) {
@@ -68,10 +79,27 @@ export async function PATCH(
 
     const updates: Partial<Request> = { ...body };
     delete (updates as Record<string, unknown>).generateDraftReply;
-    if (draftReply) (updates as Record<string, unknown>).draftReply = draftReply;
+    if (draftReply) updates.draftReplyId = draftReply;
 
-    await db.collection('requests').doc(params.id).update(updates as Record<string, unknown>);
-    const merged = Object.assign({}, existing, updates, { id: params.id, draftReply });
+    const cleanUpdates = compactObject(updates as Record<string, unknown>);
+    await db.collection('requests').doc(id).update(cleanUpdates);
+    const merged = Object.assign({}, existing, cleanUpdates, { id }) as Request;
+    await writeAuditLog(
+      auth,
+      body.status ? `request_${body.status}` : 'request_updated',
+      'request',
+      id,
+      existing.subject
+    );
+    if (body.status === 'replied' && existing.fromUserId !== auth.uid) {
+      await createServerNotification({
+        userId: existing.fromUserId,
+        type: 'request_replied',
+        title: 'Murojaatingizga javob berildi',
+        body: existing.subject,
+        link: `/dashboard/requests/${id}`,
+      });
+    }
     return NextResponse.json(merged);
   } catch (err: unknown) {
     console.error('[request PATCH error]', err);

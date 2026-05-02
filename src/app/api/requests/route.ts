@@ -1,31 +1,41 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getAdminAuth, getAdminDb } from '@/lib/firebase-admin';
+import { getAdminDb } from '@/lib/firebase-admin';
 import { generateForTask, REQUEST_CLASSIFICATION_PROMPT, REPLY_DRAFT_PROMPT } from '@/lib/vertex-ai';
-import type { Request, UserRole } from '@/types';
+import { isApiError, parseJson, requireApiUser } from '@/lib/api-auth';
+import { compactObject, createServerNotification, notifyAdmins, writeAuditLog } from '@/lib/server-events';
+import { z } from 'zod';
+import type { Request } from '@/types';
+
+const CreateRequestSchema = z.object({
+  subject: z.string().trim().min(1).max(250),
+  body: z.string().trim().min(1).max(50000),
+  toClinicId: z.string().trim().min(1).max(128).optional(),
+});
 
 export async function GET(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    const decoded = await getAdminAuth().verifyIdToken(token);
-    const role = decoded.role as UserRole;
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
     const db = getAdminDb();
 
     let snapshot;
-    if (role === 'admin') {
+    if (auth.role === 'admin') {
       snapshot = await db.collection('requests').orderBy('createdAt', 'desc').get();
+    } else if (auth.role === 'clinic') {
+      snapshot = await db
+        .collection('requests')
+        .where('toClinicId', '==', auth.uid)
+        .get();
     } else {
       snapshot = await db
         .collection('requests')
-        .where('fromUserId', '==', decoded.uid)
-        .orderBy('createdAt', 'desc')
+        .where('fromUserId', '==', auth.uid)
         .get();
     }
 
-    const requests = snapshot.docs.map((d) => ({ id: d.id, ...d.data() } as Request));
+    const requests = snapshot.docs
+      .map((d) => ({ id: d.id, ...d.data() } as Request))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     return NextResponse.json({ requests });
   } catch (err: unknown) {
     console.error('[requests GET error]', err);
@@ -35,15 +45,12 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const authHeader = req.headers.get('authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-    }
-    const token = authHeader.slice(7);
-    const decoded = await getAdminAuth().verifyIdToken(token);
+    const auth = await requireApiUser(req);
+    if (isApiError(auth)) return auth;
     const db = getAdminDb();
 
-    const body = await req.json() as { subject: string; body: string; toClinicId?: string };
+    const body = await parseJson(req, CreateRequestSchema);
+    if (body instanceof NextResponse) return body;
 
     // ── Feature 2: AI Classification (Gemini 2.5 Flash) ──────────────────
     let aiClassification: string | undefined;
@@ -84,8 +91,8 @@ export async function POST(req: NextRequest) {
     }
 
     const now = new Date().toISOString();
-    const data: Omit<Request, 'id'> = {
-      fromUserId: decoded.uid,
+    const data = compactObject({
+      fromUserId: auth.uid,
       toClinicId: body.toClinicId,
       toAdminId: body.toClinicId ? undefined : 'admin',
       subject: body.subject,
@@ -94,10 +101,28 @@ export async function POST(req: NextRequest) {
       draftReplyId: aiDraftReply,
       status: 'received',
       createdAt: now,
-    };
+    }) as Omit<Request, 'id'>;
 
     const ref = await db.collection('requests').add(data);
-    return NextResponse.json({ id: ref.id, ...data });
+    const created = { id: ref.id, ...data };
+    await writeAuditLog(auth, 'request_created', 'request', ref.id, body.subject);
+    if (body.toClinicId) {
+      await createServerNotification({
+        userId: body.toClinicId,
+        type: 'new_request',
+        title: "Yangi murojaat keldi",
+        body: body.subject,
+        link: `/dashboard/requests/${ref.id}`,
+      });
+    } else {
+      await notifyAdmins({
+        type: 'new_request',
+        title: "Yangi murojaat keldi",
+        body: body.subject,
+        link: `/dashboard/requests/${ref.id}`,
+      });
+    }
+    return NextResponse.json(created);
   } catch (err: unknown) {
     console.error('[requests POST error]', err);
     return NextResponse.json({ error: 'Server error' }, { status: 500 });

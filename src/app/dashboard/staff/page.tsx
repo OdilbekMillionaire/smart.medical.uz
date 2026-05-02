@@ -1,8 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
-import { getStaff, createStaffMember, updateStaffMember, deleteStaffMember } from '@/lib/firestore';
+import { useRouter } from 'next/navigation';
 import type { StaffMember } from '@/types';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,10 +20,27 @@ const STATUS_META: Record<StaffMember['status'], { label: string; color: string 
 
 const EMPTY_FORM: { fullName: string; role: string; specialization: string; phone: string; email: string; hireDate: string; salary: string; status: StaffMember['status'] } = { fullName: '', role: ROLES[0], specialization: '', phone: '', email: '', hireDate: '', salary: '', status: 'active' };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function StaffPage() {
-  const { user, userRole } = useAuth();
+  const { user, userRole, loading } = useAuth();
+  const router = useRouter();
   const [staff, setStaff] = useState<StaffMember[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [dataLoading, setDataLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [showForm, setShowForm] = useState(false);
@@ -33,31 +50,45 @@ export default function StaffPage() {
 
   const canEdit = userRole === 'clinic' || userRole === 'admin';
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
-    setLoading(true);
+    setDataLoading(true);
     try {
-      const data = await getStaff(user.uid);
-      setStaff(data);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ staff: StaffMember[] }>('/api/staff', token);
+      setStaff(data.staff);
     } catch { toast.error('Xodimlarni yuklashda xato'); }
-    finally { setLoading(false); }
-  }
+    finally { setDataLoading(false); }
+  }, [user]);
 
-  useEffect(() => { load(); }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!loading && userRole !== 'clinic' && userRole !== 'admin') {
+      router.replace('/dashboard');
+    }
+  }, [userRole, loading, router]);
 
   async function handleSave() {
     if (!user || !form.fullName || !form.phone) { toast.error('Ism va telefon majburiy'); return; }
     setSaving(true);
     try {
       const now = new Date().toISOString();
+      const token = await user.getIdToken();
+      const payload = {
+        ...form,
+        salary: form.salary ? Number(form.salary) : undefined,
+      };
       if (editId) {
-        await updateStaffMember(editId, { ...form, salary: form.salary ? Number(form.salary) : undefined });
+        await requestJson<StaffMember>('/api/staff', token, {
+          method: 'PATCH',
+          body: JSON.stringify({ id: editId, ...payload }),
+        });
         toast.success('Yangilandi');
       } else {
-        await createStaffMember({
-          clinicId: user.uid, ...form,
-          salary: form.salary ? Number(form.salary) : undefined,
-          createdAt: now,
+        await requestJson<StaffMember>('/api/staff', token, {
+          method: 'POST',
+          body: JSON.stringify({ ...payload, hireDate: form.hireDate || now.slice(0, 10) }),
         });
         toast.success('Xodim qo\'shildi');
       }
@@ -68,8 +99,31 @@ export default function StaffPage() {
   }
 
   async function handleDelete(id: string) {
-    try { await deleteStaffMember(id); toast.success('O\'chirildi'); await load(); }
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/staff', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
+      toast.success('O\'chirildi');
+      await load();
+    }
     catch { toast.error('O\'chirishda xato'); }
+  }
+
+  async function updateStaffStatus(id: string, status: StaffMember['status']) {
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<StaffMember>('/api/staff', token, {
+        method: 'PATCH',
+        body: JSON.stringify({ id, status }),
+      });
+      await load();
+    } catch {
+      toast.error('Yangilashda xato');
+    }
   }
 
   function startEdit(s: StaffMember) {
@@ -85,6 +139,8 @@ export default function StaffPage() {
   });
 
   const activeCount = staff.filter((s) => s.status === 'active').length;
+
+  if (loading || (userRole !== 'clinic' && userRole !== 'admin')) return null;
 
   return (
     <div className="space-y-5">
@@ -151,13 +207,13 @@ export default function StaffPage() {
         <div className="relative flex-1 max-w-sm"><Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" /><Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Ism yoki lavozim..." className="pl-9" /></div>
       </div>
 
-      {loading && <div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}</div>}
+      {dataLoading &&<div className="space-y-3">{[1,2,3].map((i) => <Skeleton key={i} className="h-20 w-full rounded-xl" />)}</div>}
 
-      {!loading && filtered.length === 0 && (
+      {!dataLoading &&filtered.length === 0 && (
         <div className="text-center py-16 bg-white rounded-xl border border-dashed"><Users className="w-12 h-12 mx-auto mb-3 text-slate-200" /><p className="text-slate-500">Xodimlar topilmadi</p></div>
       )}
 
-      {!loading && filtered.length > 0 && (
+      {!dataLoading &&filtered.length > 0 && (
         <div className="space-y-2">
           {filtered.map((s) => {
             const meta = STATUS_META[s.status];
@@ -183,12 +239,12 @@ export default function StaffPage() {
                     {canEdit && (
                       <div className="flex gap-2 shrink-0">
                         {s.status === 'active' && (
-                          <Button size="sm" variant="outline" className="text-yellow-600 h-8 text-xs" onClick={() => updateStaffMember(s.id, { status: 'leave' }).then(load)}>
+                          <Button size="sm" variant="outline" className="text-yellow-600 h-8 text-xs" onClick={() => updateStaffStatus(s.id, 'leave')}>
                             <UserMinus className="w-3.5 h-3.5 mr-1" /> Ta&apos;til
                           </Button>
                         )}
                         {s.status === 'leave' && (
-                          <Button size="sm" variant="outline" className="text-green-600 h-8 text-xs" onClick={() => updateStaffMember(s.id, { status: 'active' }).then(load)}>
+                          <Button size="sm" variant="outline" className="text-green-600 h-8 text-xs" onClick={() => updateStaffStatus(s.id, 'active')}>
                             <CheckCircle2 className="w-3.5 h-3.5 mr-1" /> Faollashtirish
                           </Button>
                         )}

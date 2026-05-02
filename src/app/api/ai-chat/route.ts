@@ -1,7 +1,22 @@
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { NextRequest, NextResponse } from 'next/server';
 import { z } from 'zod';
-import { getAdminAuth } from '@/lib/firebase-admin';
+import { isApiError, requireApiUser } from '@/lib/api-auth';
+import type { AiSource } from '@/components/shared/SourcesList';
+import { streamRAGResponse } from '@/lib/rag';
+
+function extractWebSources(chunks: unknown[]): AiSource[] {
+  const seen = new Set<string>();
+  const sources: AiSource[] = [];
+  for (const c of chunks) {
+    const chunk = c as { web?: { uri?: string; title?: string } };
+    if (chunk?.web?.uri && !seen.has(chunk.web.uri)) {
+      seen.add(chunk.web.uri);
+      sources.push({ type: 'web', title: chunk.web.title ?? chunk.web.uri, uri: chunk.web.uri });
+    }
+  }
+  return sources;
+}
 
 export const runtime = 'nodejs';
 
@@ -21,11 +36,10 @@ const REAL_GEMINI_MODELS = new Set([
   'gemini-2.5-flash',
   'gemini-2.5-pro',
   'gemini-2.0-flash',
-  'gemini-2.0-flash-lite',
 ]);
 
 // Models we'll fall back to, in order, if the primary fails.
-const FALLBACK_CHAIN = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-2.0-flash-lite'];
+const FALLBACK_CHAIN = ['gemini-2.5-flash', 'gemini-2.0-flash'];
 
 // ─── Base system prompt ───────────────────────────────────────────────────────
 const BASE_PROMPT = `
@@ -74,6 +88,7 @@ const RequestSchema = z.object({
   model: z.string().optional(),
   format: z.enum(['default', 'medical', 'summary', 'risk']).default('default'),
   context: z.string().max(2000).optional(),
+  useWebSearch: z.boolean().optional(),
 });
 
 function pickModel(mode: 'fast' | 'balanced' | 'deep', requestedModel?: string): string {
@@ -82,15 +97,8 @@ function pickModel(mode: 'fast' | 'balanced' | 'deep', requestedModel?: string):
 }
 
 export async function POST(req: NextRequest) {
-  const authHeader = req.headers.get('authorization');
-  if (!authHeader?.startsWith('Bearer ')) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
-  try {
-    await getAdminAuth().verifyIdToken(authHeader.slice(7));
-  } catch {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
-  }
+  const auth = await requireApiUser(req);
+  if (isApiError(auth)) return auth;
 
   const apiKey = process.env.GOOGLE_AI_API_KEY;
   if (!apiKey) {
@@ -115,7 +123,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const { messages, mode, model: requestedModel, format, context } = parsed.data;
+  const { messages, mode, model: requestedModel, format, context, useWebSearch } = parsed.data;
   const primaryModel = pickModel(mode, requestedModel);
 
   const systemPrompt =
@@ -125,14 +133,89 @@ export async function POST(req: NextRequest) {
 
   const temperature = mode === 'fast' ? 0.3 : mode === 'deep' ? 0.65 : 0.45;
 
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const encoder = new TextEncoder();
+
+  // ── Web Search grounding path ──────────────────────────────────────────────
+  if (useWebSearch) {
+    const wsModel = genAI.getGenerativeModel({
+      model: 'gemini-2.5-flash',
+      systemInstruction: systemPrompt,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tools: [{ googleSearch: {} } as any],
+      generationConfig: { maxOutputTokens: 4096, temperature: 0.4 },
+    });
+
+    const contents = messages.map((m) => ({
+      role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
+      parts: [{ text: m.content }],
+    }));
+
+    try {
+      const result = await wsModel.generateContentStream({ contents });
+      const readable = new ReadableStream({
+        async start(controller) {
+          try {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify({ model: 'gemini-2.5-flash (web)' })}\n\n`));
+            for await (const chunk of result.stream) {
+              const text = chunk.text();
+              if (text) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ delta: text })}\n\n`));
+            }
+            try {
+              const final = await result.response;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const meta = (final as any).candidates?.[0]?.groundingMetadata ?? {};
+              const groundingChunks: unknown[] = meta.groundingChunks ?? [];
+              const webSearchQueries: string[] = meta.webSearchQueries ?? [];
+              let sources = extractWebSources(groundingChunks);
+              // Fallback: if Gemini searched but didn't return specific URLs, show queries as search links
+              if (!sources.length && webSearchQueries.length) {
+                sources = webSearchQueries.map((q) => ({
+                  type: 'web' as const,
+                  title: q,
+                  uri: `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+                }));
+              }
+              if (sources.length) controller.enqueue(encoder.encode(`data: ${JSON.stringify({ sources })}\n\n`));
+            } catch { /* no grounding metadata */ }
+            controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+            controller.close();
+          } catch (err) { controller.error(err); }
+        },
+      });
+      return new Response(readable, {
+        headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' },
+      });
+    } catch (err) {
+      console.warn('[ai-chat] web search unavailable, falling back to standard mode:', err);
+      // fall through to standard chat path below
+    }
+  }
+
+  // ── RAG path (default when corpus is configured) ──────────────────────────
+  if (process.env.VERTEX_AI_RAG_CORPUS_LEGAL) {
+    try {
+      const ragStream = await streamRAGResponse(messages, 'general', primaryModel, context ?? undefined);
+      return new Response(ragStream, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache, no-transform',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        },
+      });
+    } catch (err) {
+      console.warn('[ai-chat] RAG failed, falling back to direct Gemini:', err);
+    }
+  }
+
+  // ── Standard chat path (fallback when RAG unavailable) ─────────────────────
   // Split history from last user message
   const history = messages.slice(0, -1).map((m) => ({
     role: m.role === 'assistant' ? ('model' as const) : ('user' as const),
     parts: [{ text: m.content }],
   }));
   const lastMessage = messages[messages.length - 1].content;
-
-  const genAI = new GoogleGenerativeAI(apiKey);
 
   // Build the fallback chain: primary first, then remaining fallbacks.
   const tryOrder = [primaryModel, ...FALLBACK_CHAIN.filter((m) => m !== primaryModel)];
@@ -150,7 +233,6 @@ export async function POST(req: NextRequest) {
       const chat = model.startChat({ history });
       const result = await chat.sendMessageStream(lastMessage);
 
-      const encoder = new TextEncoder();
       const readable = new ReadableStream({
         async start(controller) {
           try {

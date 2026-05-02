@@ -1,14 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
-import { getFirebaseDb } from '@/lib/firebase';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { useLanguage } from '@/contexts/LanguageContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -28,66 +27,82 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 
-const patientSchema = z.object({
-  fullName: z.string().min(3, "To'liq ismni kiriting"),
-  dob: z.string().min(1, "Tug'ilgan sanani kiriting"),
-  gender: z.string().min(1, 'Jinsni tanlang'),
-  phone: z
-    .string()
-    .min(9, 'Telefon raqamini kiriting')
-    .regex(/^\+?[0-9\s\-()]+$/, "Noto'g'ri telefon raqami"),
-  bloodType: z.string().optional(),
-  conditions: z.string().optional(),
-  allergies: z.string().optional(),
-});
+type PatientFormData = {
+  fullName: string;
+  dob: string;
+  gender: string;
+  phone: string;
+  bloodType?: string;
+  conditions?: string;
+  allergies?: string;
+};
 
-type PatientFormData = z.infer<typeof patientSchema>;
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
 
 export default function PatientOnboardingPage() {
   const { user } = useAuth();
+  const { t } = useLanguage();
   const router = useRouter();
   const [loading, setLoading] = useState(false);
 
+  const patientSchema = useMemo(
+    () => z.object({
+      fullName: z.string().min(3, t.common.required),
+      dob: z.string().min(1, t.common.required),
+      gender: z.string().min(1, t.common.required),
+      phone: z
+        .string()
+        .min(9, t.common.required)
+        .regex(/^\+?[0-9\s\-()]+$/, t.common.error),
+      bloodType: z.string().optional(),
+      conditions: z.string().optional(),
+      allergies: z.string().optional(),
+    }),
+    [t]
+  );
   const form = useForm<PatientFormData>({ resolver: zodResolver(patientSchema) });
 
   async function onSubmit(data: PatientFormData) {
     if (!user) return;
     setLoading(true);
     try {
-      const patientData = {
-        uid: user.uid,
-        email: user.email ?? '',
-        displayName: data.fullName,
-        role: 'patient' as const,
-        profileComplete: true,
-        createdAt: new Date().toISOString(),
-        fullName: data.fullName,
-        dob: data.dob,
-        gender: data.gender,
-        phone: data.phone,
-        bloodType: data.bloodType ?? null,
-        conditions: data.conditions
-          ? data.conditions.split(',').map((c) => c.trim()).filter(Boolean)
-          : [],
-        allergies: data.allergies
-          ? data.allergies.split(',').map((a) => a.trim()).filter(Boolean)
-          : [],
-        updatedAt: new Date().toISOString(),
-      };
-
-      await Promise.all([
-        setDoc(doc(getFirebaseDb(), 'patients', user.uid), patientData),
-        updateDoc(doc(getFirebaseDb(), 'users', user.uid), {
-          profileComplete: true,
-          displayName: data.fullName,
-          updatedAt: new Date().toISOString(),
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/onboarding', token, {
+        method: 'POST',
+        body: JSON.stringify({
+          role: 'patient',
+          fullName: data.fullName,
+          dob: data.dob,
+          gender: data.gender,
+          phone: data.phone,
+          bloodType: data.bloodType ?? null,
+          conditions: data.conditions
+            ? data.conditions.split(',').map((c) => c.trim()).filter(Boolean)
+            : [],
+          allergies: data.allergies
+            ? data.allergies.split(',').map((a) => a.trim()).filter(Boolean)
+            : [],
         }),
-      ]);
+      });
 
-      toast.success('Profil muvaffaqiyatli yaratildi!');
+      toast.success(t.onboarding.success);
       router.replace('/dashboard');
     } catch {
-      toast.error("Xato yuz berdi. Qayta urinib ko'ring");
+      toast.error(t.common.error);
     } finally {
       setLoading(false);
     }
@@ -96,15 +111,15 @@ export default function PatientOnboardingPage() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-2xl text-center">Bemor profilini to&apos;ldiring</CardTitle>
+        <CardTitle className="text-2xl text-center">{t.onboarding.patient.title}</CardTitle>
         <CardDescription className="text-center">
-          Shaxsiy ma&apos;lumotlaringizni kiriting
+          {t.onboarding.title}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
           <div className="space-y-2">
-            <Label>To&apos;liq ism (F.I.O.)</Label>
+            <Label>{t.onboarding.patient.fullName}</Label>
             <Input placeholder="Abdullayev Alisher Karimovich" {...form.register('fullName')} />
             {form.formState.errors.fullName && (
               <p className="text-sm text-red-500">{form.formState.errors.fullName.message}</p>
@@ -112,7 +127,7 @@ export default function PatientOnboardingPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Tug&apos;ilgan sana</Label>
+            <Label>{t.onboarding.patient.dob}</Label>
             <Input type="date" {...form.register('dob')} />
             {form.formState.errors.dob && (
               <p className="text-sm text-red-500">{form.formState.errors.dob.message}</p>
@@ -120,12 +135,12 @@ export default function PatientOnboardingPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Jinsi</Label>
+            <Label>{t.onboarding.patient.gender}</Label>
             <Select onValueChange={(v: string | null) => { if (v) form.setValue('gender', v); }}>
-              <SelectTrigger><SelectValue placeholder="Jinsni tanlang" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder={t.onboarding.patient.gender} /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="erkak">Erkak</SelectItem>
-                <SelectItem value="ayol">Ayol</SelectItem>
+                <SelectItem value="erkak">{t.onboarding.patient.genderMale}</SelectItem>
+                <SelectItem value="ayol">{t.onboarding.patient.genderFemale}</SelectItem>
               </SelectContent>
             </Select>
             {form.formState.errors.gender && (
@@ -134,7 +149,7 @@ export default function PatientOnboardingPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Telefon raqami</Label>
+            <Label>{t.onboarding.patient.phone}</Label>
             <Input placeholder="+998 90 123 45 67" {...form.register('phone')} />
             {form.formState.errors.phone && (
               <p className="text-sm text-red-500">{form.formState.errors.phone.message}</p>
@@ -142,9 +157,9 @@ export default function PatientOnboardingPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Qon guruhi (ixtiyoriy)</Label>
+            <Label>{t.onboarding.patient.bloodType}</Label>
             <Select onValueChange={(v: string | null) => { if (v) form.setValue('bloodType', v); }}>
-              <SelectTrigger><SelectValue placeholder="Qon guruhini tanlang" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder={t.onboarding.patient.bloodType} /></SelectTrigger>
               <SelectContent>
                 {['O(I)+', 'O(I)-', 'A(II)+', 'A(II)-', 'B(III)+', 'B(III)-', 'AB(IV)+', 'AB(IV)-'].map((bg) => (
                   <SelectItem key={bg} value={bg}>{bg}</SelectItem>
@@ -154,18 +169,18 @@ export default function PatientOnboardingPage() {
           </div>
 
           <div className="space-y-2">
-            <Label>Surunkali kasalliklar (ixtiyoriy)</Label>
+            <Label>{t.onboarding.patient.conditions}</Label>
             <Textarea
-              placeholder="Vergul bilan ajrating: Diabet, Gipertoniya..."
+              placeholder={t.onboarding.patient.conditions}
               rows={2}
               {...form.register('conditions')}
             />
           </div>
 
           <div className="space-y-2">
-            <Label>Allergiyalar (ixtiyoriy)</Label>
+            <Label>{t.onboarding.patient.allergies}</Label>
             <Textarea
-              placeholder="Vergul bilan ajrating: Penitsillin, Chang..."
+              placeholder={t.onboarding.patient.allergies}
               rows={2}
               {...form.register('allergies')}
             />
@@ -175,10 +190,10 @@ export default function PatientOnboardingPage() {
             {loading ? (
               <span className="flex items-center gap-2">
                 <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                Saqlanmoqda...
+                {t.onboarding.saving}
               </span>
             ) : (
-              'Profilni yaratish'
+              t.onboarding.save
             )}
           </Button>
         </form>

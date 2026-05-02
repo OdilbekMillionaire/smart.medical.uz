@@ -1,9 +1,8 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-import { getEventsByClinic, getAllEvents, createEvent, deleteEvent } from '@/lib/firestore';
 import type { ClinicEvent } from '@/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -38,6 +37,22 @@ const TYPE_COLORS: Record<ClinicEvent['type'], string> = {
 
 const EMPTY = { title: '', description: '', type: 'meeting' as ClinicEvent['type'], date: '', endDate: '', location: '', organizer: '' };
 
+async function requestJson<T>(url: string, token: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      ...(init?.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({})) as { error?: string };
+    throw new Error(data.error ?? `Request failed (${res.status})`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export default function CalendarPage() {
   const { user, userRole } = useAuth();
   const { t, lang } = useLanguage();
@@ -59,23 +74,28 @@ export default function CalendarPage() {
     other: t.calendar.types.other,
   };
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
-      const data = userRole === 'admin' ? await getAllEvents() : await getEventsByClinic(user.uid);
-      setEvents(data);
+      const token = await user.getIdToken();
+      const data = await requestJson<{ events: ClinicEvent[] }>('/api/events', token);
+      setEvents(data.events);
     } catch { toast.error(t.calendar.loadError); }
     finally { setLoading(false); }
-  }
+  }, [t.calendar.loadError, user]);
 
-  useEffect(() => { load(); }, [user, userRole]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { load(); }, [load]);
 
   async function handleCreate() {
     if (!user || !form.title || !form.date) { toast.error(t.calendar.titleRequired); return; }
     setSaving(true);
     try {
-      await createEvent({ ...form, clinicId: user.uid, description: form.description || undefined, endDate: form.endDate || undefined, location: form.location || undefined, organizer: form.organizer || undefined, createdAt: new Date().toISOString() });
+      const token = await user.getIdToken();
+      await requestJson<ClinicEvent>('/api/events', token, {
+        method: 'POST',
+        body: JSON.stringify({ ...form, description: form.description || undefined, endDate: form.endDate || undefined, location: form.location || undefined, organizer: form.organizer || undefined }),
+      });
       toast.success(t.calendar.added);
       setShowForm(false); setForm(EMPTY); await load();
     } catch { toast.error(t.calendar.saveError); }
@@ -94,6 +114,20 @@ export default function CalendarPage() {
     if (!grouped[key]) grouped[key] = [];
     grouped[key].push(e);
   });
+
+  async function handleDelete(id: string) {
+    try {
+      if (!user) return;
+      const token = await user.getIdToken();
+      await requestJson<{ success: boolean }>('/api/events', token, {
+        method: 'DELETE',
+        body: JSON.stringify({ id }),
+      });
+      await load();
+    } catch {
+      toast.error(t.common.error);
+    }
+  }
 
   return (
     <div className="space-y-5">
@@ -183,7 +217,7 @@ export default function CalendarPage() {
                         </div>
                       </div>
                       {canCreate && (
-                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-300 hover:text-red-500 shrink-0" onClick={() => deleteEvent(ev.id).then(load)}>
+                        <Button size="sm" variant="ghost" className="h-8 w-8 p-0 text-slate-300 hover:text-red-500 shrink-0" onClick={() => handleDelete(ev.id)}>
                           <Trash2 className="w-3.5 h-3.5" />
                         </Button>
                       )}

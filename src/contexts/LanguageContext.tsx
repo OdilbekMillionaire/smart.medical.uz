@@ -34,14 +34,16 @@ interface LanguageContextValue {
   t: Translations;
 }
 
+const DEFAULT_LANGUAGE: Language = 'ru';
+
 const LanguageContext = createContext<LanguageContextValue>({
-  lang: 'uz',
+  lang: DEFAULT_LANGUAGE,
   setLang: () => undefined,
-  t: uz,
+  t: ru,
 });
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Language>('uz');
+  const [lang, setLangState] = useState<Language>(DEFAULT_LANGUAGE);
 
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Language | null;
